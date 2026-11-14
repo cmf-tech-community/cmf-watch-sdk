@@ -12,6 +12,10 @@ on a real watch. Every install onto a physical watch needs the owner's approval 
 
 ## 1. Quick start
 
+To publish an app to the FMC store, write it in [cmf-tech-community/apps](https://github.com/cmf-tech-community/apps)
+instead: it pins this SDK and publishes what's merged there. The steps below build an app inside this repository, as
+one of the SDK's examples.
+
 ### Create the crate
 
 1. Copy `sdk/examples/vibration-lab` to `sdk/examples/<name>` (it has the host-test layout and an `icon.svg`).
