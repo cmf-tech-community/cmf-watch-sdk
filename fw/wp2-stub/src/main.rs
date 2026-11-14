@@ -3,6 +3,7 @@
 
 mod applist;
 mod ble;
+mod card;
 mod view;
 
 use core::ffi::c_void;
@@ -17,7 +18,8 @@ pub struct StubHeader {
     view_proc: extern "C" fn(u32, u32, *mut c_void) -> i32,
     view_name: *const u8,
     applist_layout: extern "C" fn(*mut u8) -> i32,
-    _r: u32,
+    /// wgt_reg entry for the free widget id 0x40 (card.rs); was reserved (0) before
+    widget: &'static card::WgtReg,
 }
 
 unsafe impl Sync for StubHeader {}
@@ -32,7 +34,7 @@ static HEADER: StubHeader = StubHeader {
     view_proc: view::wp2_view_proc,
     view_name: b"wp2_view\0".as_ptr(),
     applist_layout: applist::wp2_applist_layout,
-    _r: 0,
+    widget: &card::WIDGET,
 };
 
 // Replaces `bl 0x10146AA4` (ResFbHeap init, 4 of its 8 arguments on the stack) at 0x101884FA.

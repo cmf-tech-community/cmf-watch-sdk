@@ -15,8 +15,35 @@ except (FileNotFoundError, ImportError):
 HAVE_STOCK = STOCK is not None
 
 
-def fake_stub(boot=0x1025A0A1, ble=0x1025A0C1, view_proc=0x1025A0E1, view_name=0x1025A100, applist=0):
-    return b"WP2S" + struct.pack("<IIIIIII", 1, boot, ble, view_proc, view_name, applist, 0) + bytes(0x100)
+def fake_stub(boot=0x1025A0A1, ble=0x1025A0C1, view_proc=0x1025A0E1, view_name=0x1025A100, applist=0, widget=0,
+              entry=None):
+    """entry: a widget registry entry placed at WIDGET_AT."""
+    stub = bytearray(b"WP2S" + struct.pack("<IIIIIII", 1, boot, ble, view_proc, view_name, applist, widget) + bytes(0x100))
+    if entry is not None:
+        at = WIDGET_AT - 0x1025A080
+        stub[at:at + len(entry)] = entry
+    return bytes(stub)
+
+
+WIDGET_AT = 0x1025A140
+CALLBACKS = (0x1025A0A1, 0x1025A0C1, 0x1025A0E1, 0x1025A0A1, 0x1025A0A1)
+
+
+def widget_entry(wid=0x40, callbacks=CALLBACKS):
+    return firmware.WGT_ENTRY.pack(wid, 3, 40, 0, 0xF0, *callbacks)
+
+
+def synthetic_app():
+    """Zeros of the stock app's length with the stock words add_stub checks before it rewrites them."""
+    app = bytearray(firmware.STUB_OFFSET)
+    for lits, value in ((firmware.VIEW_START_LITERALS, firmware.VIEW_TABLE),
+                        (firmware.VIEW_END_LITERALS, firmware.VIEW_TABLE_END)):
+        for lit in lits:
+            struct.pack_into("<I", app, lit - 0x10000000, value)
+    struct.pack_into("<I", app, firmware.APPLIST_LAYOUT - 0x10000000, firmware.STOCK_APPLIST_LAYOUT)
+    for at, target in ((firmware.BOOT_CALL, firmware.STOCK_HEAP_INIT), (firmware.BLE_CALL, firmware.STOCK_BLE_READ)):
+        app[at - 0x10000000:at - 0x10000000 + 4] = firmware.thumb_bl(at, target)
+    return app
 
 
 class FirmwareTest(unittest.TestCase):
@@ -254,6 +281,32 @@ class FirmwareTest(unittest.TestCase):
                     dict(applist=0x1025A081 + 0x4000)):
             with self.subTest(**bad), self.assertRaisesRegex(ValueError, "stub"):
                 firmware.patch(STOCK, fake_stub(**bad))
+
+    def test_widget_slot_patched(self):
+        slot = firmware.WGT_REG + 4 * firmware.WGT_ID - 0x10000000
+        out = synthetic_app()
+        firmware.add_stub(out, fake_stub(widget=WIDGET_AT, entry=widget_entry()))
+        self.assertEqual(struct.unpack_from("<I", out, slot)[0], WIDGET_AT)
+        without = synthetic_app()
+        firmware.add_stub(without, fake_stub())
+        self.assertEqual(without[slot:slot + 4], bytes(4))
+        self.assertEqual({i for i in range(firmware.STUB_OFFSET) if out[i] != without[i]}, set(range(slot, slot + 4)))
+
+    def test_widget_slot_must_be_free(self):
+        out = synthetic_app()
+        struct.pack_into("<I", out, firmware.WGT_REG + 4 * firmware.WGT_ID - 0x10000000, 0x101F0784)
+        with self.assertRaises(ValueError):
+            firmware.add_stub(out, fake_stub(widget=WIDGET_AT, entry=widget_entry()))
+
+    def test_widget_entry_checked(self):
+        for name, stub in (("misaligned", fake_stub(widget=WIDGET_AT + 2, entry=widget_entry())),
+                           ("outside", fake_stub(widget=0x1025A080 + 0x120, entry=widget_entry())),
+                           ("other id", fake_stub(widget=WIDGET_AT, entry=widget_entry(wid=0x41))),
+                           ("arm callback", fake_stub(widget=WIDGET_AT, entry=widget_entry(callbacks=(0x1025A0A0,) * 5))),
+                           ("callback out of the stub", fake_stub(widget=WIDGET_AT,
+                                                                  entry=widget_entry(callbacks=(0x101B1A05,) * 5)))):
+            with self.subTest(name), self.assertRaisesRegex(ValueError, "widget"):
+                firmware.add_stub(synthetic_app(), stub)
 
     def test_heap_shrinks_by_stub_ram_only(self):
         self.assertEqual(firmware.HEAP_OLD - firmware.HEAP_NEW, 0x1000)

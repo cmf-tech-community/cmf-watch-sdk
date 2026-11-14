@@ -38,7 +38,7 @@ const OUT_BOTTOM_LEFT: u32 = 0xD;
 const OUT_RIGHT_MID: u32 = 0x14;
 
 // Stock icons: LV_IMG_CF_TRUE_COLOR_ALPHA 96x96 (RGB565 LE + alpha), a filled circle with a light glyph.
-const ICON: usize = 96;
+pub(crate) const ICON: usize = 96;
 const PIXELS: usize = ICON * ICON * 3;
 // The emulator's GPU model reads 3-byte pixels only behind this header (cmf-watch-utils acts_vg_resource_packed);
 // the firmware programs the GPU the same way for stock icons and ours.
@@ -50,7 +50,7 @@ const GLYPH: u16 = 0xF79E;
 type Obj = *mut u8;
 
 #[repr(C)]
-struct ImgDsc {
+pub(crate) struct ImgDsc {
     header: u32,
     size: u32,
     data: *const u8,
@@ -85,20 +85,7 @@ unsafe fn add_row(data: *mut u8) {
     if cont.is_null() || unsafe { *data.add(8) } != ROWS || stock!(OBJ_GET_CHILD_CNT, fn(Obj) -> u32)(cont) != ROWS as u32 {
         return;
     }
-    // [64 B header like the stock resource cache's][pixels, 64-byte aligned like the stock icons][ImgDsc]
-    let block = heap::alloc(RES, BLOCK as u32, 0x40);
-    if block.is_null() {
-        return;
-    }
-    let (pixels, dsc) = unsafe { (block.add(HEAD), block.add(HEAD + PIXELS) as *mut ImgDsc) };
-    unsafe {
-        let head = core::slice::from_raw_parts_mut(block as *mut u32, HEAD / 4);
-        head.fill(0);
-        (head[2], head[4], head[5], head[6], head[8]) = ((HEAD + PIXELS) as u32, ICON as u32, ICON as u32, 3, pixels as u32);
-        draw_icon(core::slice::from_raw_parts_mut(pixels, PIXELS));
-        dsc.write(ImgDsc { header: 5 | (ICON as u32) << 10 | (ICON as u32) << 21, size: PIXELS as u32, data: pixels });
-    }
-    sync_psram(block, BLOCK as u32);
+    let Some((block, dsc)) = icon_block() else { return };
 
     // The row stays the last child: the stock fisheye walks children 0..24 and must keep seeing the stock rows.
     let get_child = stock!(OBJ_GET_CHILD, fn(Obj, i32) -> Obj);
@@ -134,6 +121,25 @@ unsafe fn add_row(data: *mut u8) {
     }
     add_cb(cont, fisheye, SCROLL, row);
     stock!(EVENT_SEND, fn(Obj, u32, *mut u8) -> u32)(cont, SCROLL, core::ptr::null_mut());
+}
+
+/// The Custom Apps icon in a RES block: [64 B header like the stock resource cache's][pixels, 64-byte aligned like
+/// the stock icons][ImgDsc]. Freed with `heap::free(RES, block)`.
+pub(crate) fn icon_block() -> Option<(*mut u8, *const ImgDsc)> {
+    let block = heap::alloc(RES, BLOCK as u32, 0x40);
+    if block.is_null() {
+        return None;
+    }
+    let (pixels, dsc) = unsafe { (block.add(HEAD), block.add(HEAD + PIXELS) as *mut ImgDsc) };
+    unsafe {
+        let head = core::slice::from_raw_parts_mut(block as *mut u32, HEAD / 4);
+        head.fill(0);
+        (head[2], head[4], head[5], head[6], head[8]) = ((HEAD + PIXELS) as u32, ICON as u32, ICON as u32, 3, pixels as u32);
+        draw_icon(core::slice::from_raw_parts_mut(pixels, PIXELS));
+        dsc.write(ImgDsc { header: 5 | (ICON as u32) << 10 | (ICON as u32) << 21, size: PIXELS as u32, data: pixels });
+    }
+    sync_psram(block, BLOCK as u32);
+    Some((block, dsc))
 }
 
 // The stock fisheye (0x1005ED98) for our row: x shift, icon zoom and label opacity by distance from the centre.

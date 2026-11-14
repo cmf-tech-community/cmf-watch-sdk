@@ -253,6 +253,22 @@ def cmd_workout(args):
     return workout.main(args)
 
 
+def cmd_cards(args):
+    from . import cards
+
+    async def run(s):
+        if args.action == "get":
+            return await cards.get(s)
+        if args.action == "set":
+            new = cards.Cards(args.wrap, tuple(cards.parse_card(c) for c in args.card))
+        else:
+            new = cards.with_apps(await cards.get(s))
+        await cards.put(s, new)
+        return await cards.get(s)
+
+    print(json.dumps(cards.to_json(asyncio.run(with_watch(args, run)))))
+
+
 def cmd_scan(args):
     found = asyncio.run(blegatt.scan(args.timeout))
     print(json.dumps({"devices": [
@@ -357,6 +373,20 @@ def parser():
     where.add_argument("--hci-port", type=int, help="netsimd H4 TCP port (emulator)")
     where.add_argument("--address", help="BLE address of a real watch")
     br.set_defaults(handler=cmd_bridge)
+    cards_cmd = commands.add_parser("cards", help="The cards left of the watch face (stock 0x906D, docs/recon.md "
+                                                  "\"Widget cards\"); set and add-apps write to the watch")
+    actions = cards_cmd.add_subparsers(dest="action", required=True)
+    for name, help_ in (("get", "Print the card list"),
+                        ("set", "Replace the list: view:ID (a stock view) or widgets:ID[/PARAM],... (up to 4)"),
+                        ("add-apps", "Append a card with the stub's Apps widget (id 0x40) unless one has it")):
+        sub = actions.add_parser(name, help=help_)
+        if name == "set":
+            sub.add_argument("card", nargs="*", help="up to 8 cards, in page order")
+            sub.add_argument("--wrap", action="store_true", help="the pages wrap around")
+        where = sub.add_mutually_exclusive_group(required=True)
+        where.add_argument("--hci-port", type=int, help="netsimd H4 TCP port (emulator)")
+        where.add_argument("--address", help="BLE address (CoreBluetooth UUID on macOS) of a real watch")
+        sub.set_defaults(handler=cmd_cards)
     scan = commands.add_parser("scan", help="List nearby CMF watches (read-only; address redacted by default)")
     scan.add_argument("--timeout", type=float, default=5.0)
     scan.add_argument("--show-address", action="store_true")

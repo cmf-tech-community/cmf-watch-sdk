@@ -521,3 +521,58 @@ and whether the reading drops to 0 off the wrist, the sport algorithm's input (`
 with the bpm), the stock workout's pause, the battery cost. Calling `hr_callback` on whatever thread enters
 `os_mutex_lock` first stopped the emulator twice ("Guest hit a fatal or unsupported path"); the probe calls it on
 `ui_service`.
+
+## Widget cards (face swipe left)
+
+Static only (capstone on the stock `app.bin` with the stub, 2026-11-14); nothing here is proven in the emulator yet.
+The pages left of the face are the clock plus up to 7 cards. A card is either a grid of system widgets or a whole
+stock view. The phone sets the list over BLE; the firmware keeps it as one property.
+
+| Item | Finding | Confidence |
+|---|---|---|
+| Page list | launcher (`launcher_app.c`) at `0x1005D8BE`: double-buffered list (`0x380014D4` / `0x38001500`), entry 0 = `0x10` (clock), then `CardList(out + 1, 7)` `0x1009B7EC` (logs `CardList cnt:%u`) | high (static) |
+| Card config | ux2sys property **`0x2F`**, 98 B (`0x62`), read into RAM **`0x38045CA0`** (`0x100E096C(0x2F, buf, 0x62)`): 8 entries × 12 B, byte `0x60` = `cycle_scrolling_sw` (pages wrap), byte `0x61` not traced | medium |
+| Entry, byte 0 = type | **1** = widget card: `+2` u8 widget count (≤ 4), `+3` four `{u8 widget_id, u8 param_id}` pairs; shown by the next free slot view `0xD0 + n`. **2** = view card: `+2` u16 `view_id`, the page is that stock view itself. Type 1 with count 0 is skipped | medium |
+| Slot views | `card_widget_view`, `card_widget2_view` … `card_widget8_view`, ids **`0xD0`…`0xD7`** in the stock view table (`0x10000D88` … `0x10000CE0`). Each proc is a 0x1C-byte wrapper calling the style-desc proc `0x100D587C` with its own desc (`0x101EFF64` for `0xD0` … `0x101EFF34` for `0xD7`, stride 0x30) | high |
+| Slot desc | `{u8 0, u8 2, u16 view_id, u32 0x94 data size, u32 scene 0xE6EB202D, +0xC layout 0x1009B9E9, +0x10 0x101B1AD3, +0x14 0x101B1A09, +0x18 0x1009B8F9, +0x1C… defaults 0x101B1A05/7B/3D/73}`; identical for all 8 apart from the id | high |
+| Slot layout | `0x1009B9E9` (`_card_widget_view_layout`): config of the n-th widget card `0x1009B7B0(view_id − 0xD0)` (logs `card widget_info == NULL` without one); per widget: `wgt_reg` lookup `0x1009B79C(id)` (`wgt_reg not found, wgt_id:%u`), a container `lv_obj_create(screen)` sized by class, radius by class, bg opa 255, `user_data` = `param_id`, a `SHORT_CLICKED` callback `0x101B1B15` with the entry's tap action, position; the state (`lv_mem_alloc` of the entry's size, zeroed; `wge out of memory, id:%u, size:%u`); then `create(ctx)` and `update(ctx)`. Finally a 1000 ms `lv_timer` (`0x101B1B07`, kept at data `+0x90`) | high (static) |
+| Grid | sizes by class (`0x101DF780`): 0 = 166×166 circle (radius `0x7FFF`), 1 = 166×166, 2 = 166×344, 3 = 344×166, 4 = 344×344 (radius 38 for 1–4). Origin (61, 61), gap 12, area to 344: a 2×2 grid of 166 px cells | high (static) |
+| View data (`0x94` B) | `+0` screen, `+4` the card's config copy (count first), `+0x10` four 0x1C-byte widget contexts, `+0x80` four `wgt_reg` pointers, `+0x90` the timer | high (static) |
+| Widget context (`ctx`) | `+0` a copy of the presenter's first 16 bytes, `+0x10` the container, `+0x14` the state (NULL when the size is 0), `+0x18` u16 widget id | high (static) |
+| Callbacks | create `+0x10 (ctx)` and update `+0x14 (ctx)` once at layout; update every second from the timer while the slot view is on top (`0x1018C020(view_id)`); focus `+0x18 (ctx, arg)` from desc `+0x14`; reload `+0x1C (ctx, arg)` from desc `+0x24`; delete `+0xC (ctx)` from desc `+0x20` (unload), which then frees the state and deletes the screen. All but create and the first update are skipped while the state is NULL. Return values are ignored (stock no-ops return 0) | high (static) |
+| Tap | `0x101B1B14`: the action `0` does nothing, `≤ 0xF4` is `OPEN_VIEW(action, 0)` (`0x6B` first sets the sport type from the container's `user_data`), above that a function called with the event | high (static) |
+| Widget registry `wgt_reg` | flash table **`0x101EFC88`**: 99 pointers, ids `0x00`…`0x62` (lookup returns NULL above `0x62`). **Id `0x40` is NULL** (free). Entry: `{u8 id, u8 size class (0, 1, 3; the first style of a family is 3), u16 state size, u32 resource scene, u32 tap action (a view id, or a function that opens an app), 5 callbacks}`; callbacks `+0xC` delete, `+0x10` create, `+0x14` update, `+0x18` focus, `+0x1C` reload (row "Callbacks") | high (static) |
+| BLE command | **`0x906D`**: case 27 of the `0x9052…0x908B` jump table at `0x100D351C`, handler **`0x100D0594`** (tag `view_card_setting`). Get and set; set clamps to 8 cards and 4 widgets per card, copies the 98 B to the settings store `0x38007880` and calls `0x100E05EC(0xE4, 0)` (save/refresh, assumed). The same frame carries `cycle_scrolling_sw` (pages wrap). Plaintext (session key, as every stock command): request `00` = get, `01 <wrap> <count ≤ 8> <cards>` = set, a card being `02 <u16 LE view_id>` or `01 <n ≤ 4> n × <widget_id, param_id>`; set replaces all 98 B (zeroed first). Reply **`0xA06D`**: `01 <wrap> <count> <cards>` to a get, `00` to a set. `src/wp2apps/cards.py` | high (static) |
+
+Widget families by tap action (ids are `wgt_reg` indices):
+
+| Ids | Opens | Family |
+|---|---|---|
+| 1–6 | `0x7E` `activity_record_steps_view` | steps |
+| 7–12 | `0x7B` `activity_record_calories_view` | calories |
+| 13–18 | `0x7D` `activity_record_stands_view` | stand |
+| 19–24 | `0x7C` `activity_record_strenght_view` | exercise / strength |
+| 25–30 | `0xB2` `app_heart_view` (function `0x1006F1E5`) | heart rate (`wgtN hr curr`) |
+| 31–36 | `0x73` `bloodoxygen` | SpO2 |
+| 37–42 | `0x9B` `pressure_detecting_view` (`0x101B30C9`) | stress (`wgt_stress_style*`) |
+| 43–48 | `0xE9` `sleep_data_view` (`0x10074739`) | sleep |
+| 49–53, 97, 98 | `0x5A` `weather_main_view` (`0x1007F699`) | weather |
+| 54–58 | `0x63` `timer_running_view` | timer |
+| 59–62 | `0x8C` `breath_view` | breathing |
+| 63, 65–67 | `0x1C` `stopwatch_view` | stopwatch |
+| 68–71 | none | not identified |
+| 72–76 / 77–81 / 0, 82–86 | `0x95` / `0x94` / `0xA8` | call log / contacts / dialer |
+| 87–91 | `0x6B` `sport_prepartion_view` | sport (`widget_sport sport_type`) |
+| 92 / 93 / 94 / 95–96 | `0x90` music / `0x79` `appactivity_record_view` / vitality (`0x100872F9`) / `0xDA` `female_main_view` | music / activity / vitality / cycle |
+
+The stub's widget (`fw/wp2-stub/src/card.rs`): the stub header's last word (reserved, 0 before) points at a
+`wgt_reg` entry for id `0x40`, and `wp2apps firmware` writes it into the free slot `0x101EFD88` (the stock word is
+checked to be 0). "Apps": class 3 (344×166), tap action `0xF0` (the loader menu, opened by the stock tap handler),
+the Custom Apps icon and "Apps" in `font32M` on `#1A1C1F`; the state holds the font and the icon block, delete
+frees them. The callbacks live in the stub because the loader is in memory only while view `0xF0` is open. The
+host puts the widget on a card with `wp2apps cards add-apps` (or `cards set widgets:0x40`). Nothing X does not
+know id `0x40`; how it shows or rewrites such a list is untested.
+
+Not proven (no emulator on the machine that wrote this): the widget drawing and tapping in the emulator, whether
+the pages rebuild after a set without leaving the face, what the 1 s update costs, `param_id` of the stock
+families, byte `0x61`.
