@@ -316,7 +316,7 @@ have ~5 ms granularity (`next_event` in `fw/wp2-loader/src/app.rs`). Never spin 
   `ScreenOffTest`); deep sleep (S2/S3BT) and AOD are not modelled there and are unverified on hardware.
 - **The press that ends AOD** reaches the view after the launcher's late-resume (`0x83`): the loader drops a key that
   comes while asleep (`0x82`) or within 500 ms of `0x83`. An app on an older loader drops a `BUTTON` within 500 ms of
-  `RESUME` itself (workout does). The emulator does not model AOD: seen on hardware only.
+  `RESUME` itself. The emulator does not model AOD: seen on hardware only.
 
 ### Time
 
@@ -729,7 +729,7 @@ LVGL's small built-in one, a widget without styles is bare. `stock` gives:
 - the stock app list: `focus_page(b, icon)` and `focus_row` (FOCUS: the fisheye, the centred row CHECKED, `FOCUSED`
   events with its index), as herdr-agents uses them.
 - the stock Exercise list: `focus_page(b, FOCUS_CARDS)` and `focus_card` (cards that narrow away from the centre;
-  a loader from 2026-11-13 on, `docs/abi-1.4.md`), as workout uses them.
+  a loader from 2026-11-13 on, `docs/abi-1.4.md`).
 
 Labels with a fixed size: `b.long_mode(label, LongMode::Dot)` keeps them on one line ending in "...".
 

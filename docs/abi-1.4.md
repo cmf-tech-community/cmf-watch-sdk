@@ -1,7 +1,7 @@
 # Host channel 1.4: own channel key K and unsolicited app messages
 
-Stub and loader changes for hosts that cannot bind or poll: an iPhone app next to Nothing X on the system's shared
-BLE link (design: `docs/specs/2026-11-13-workout-ios-design.md`). Proof in the emulator:
+Stub and loader changes for hosts that cannot bind or poll: a phone app next to Nothing X on the system's shared
+BLE link. Proof in the emulator:
 `tests/test_chan_key_e2e.py`. Not yet on hardware. Apps see no change; `Api` is unchanged.
 
 ## Channel key K
@@ -51,7 +51,6 @@ the loader centres each one with `TRANSLATE_X = shift`: a width set from `LAYOUT
 a flex centre lags one scroll behind. The loader owns the cards' `Width`, `TranslateX` and `TextOpa`. `ABI_MINOR`
 stays 3: the stub on the watch refuses packages above its `LOADER_ABI_MINOR` (3), and raising it takes an OTA. An
 older loader answers `-22` to this FOCUS, so install the loader before an app that uses it.
-`workout` uses it for its day and exercise lists (emulator frames: `runs/workout-e2e/1-start.png`, `1-day.png`).
 
 ## Heart rate (loader of 2026-11-14, no ABI bump)
 

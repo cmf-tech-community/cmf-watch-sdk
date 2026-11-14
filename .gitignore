@@ -9,9 +9,3 @@ __pycache__/
 /sdk/target/
 /fw/target/
 .superpowers/
-ios/WireKit/.build/
-ios/Workout.xcodeproj/
-ios/build/
-ios/Workout/Info.plist
-ios/Workout/Resources/workout.wp2app
-ios/WorkoutWidget/Info.plist

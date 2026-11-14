@@ -1,5 +1,4 @@
-"""TCP bridge to the running app over the K channel (docs/abi-1.4.md): hex lines both ways, as `scripts/sim --tcp`.
-Lets the iPhone app's WireKit (SimChannel) and the app in the iOS Simulator talk to the emulator or a watch."""
+"""TCP bridge to the running app over the K channel (docs/abi-1.4.md): hex lines both ways, as `scripts/sim --tcp`."""
 import asyncio
 
 from . import channel

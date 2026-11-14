@@ -1,14 +1,13 @@
 # App ABI 1.3: the app owns "back"
 
-Status: implemented, 2026-11-13. JX402 `1.0.0.73` only. Design: `docs/specs/2026-11-13-workout-app-design.md`
-("Loader change: the app handles back"). Emulator proof: `tests/test_back_e2e.py` (`OwnBackTest`, app
+Status: implemented, 2026-11-13. JX402 `1.0.0.73` only. Emulator proof: `tests/test_back_e2e.py` (`OwnBackTest`, app
 `sdk/examples/back-owner`). Not yet run on a real watch: installing the 1.3 firmware or loader needs the owner's yes
 (`AGENTS.md`, hard rule 1).
 
 ## Why
 
 Up to 1.2 the loader force-stops an app 1000 ms after `BUTTON` (crown press or right swipe). An app cannot use the
-button as "back" inside itself, nor ask "leave the workout?" before it exits.
+button as "back" inside itself, nor ask "leave?" before it exits.
 
 ## The call
 
