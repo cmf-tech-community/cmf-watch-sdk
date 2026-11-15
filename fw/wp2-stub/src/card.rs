@@ -40,8 +40,10 @@ const STYLE_TEXT_FONT: u32 = 0x57;
 const LONG_DOT: u32 = 1;
 /// clicks on the icon and the text reach the container and its stock tap handler, as on the Custom Apps row
 const EVENT_BUBBLE: u32 = 0x4000;
-/// stock widget cards: #1A1C1F (docs/recon-lvgl.md); the icon's circle (#282C30) stays visible on it
-const CARD_BG: u32 = 0x18E3;
+/// stock widget cards: the emulator frame reads (26, 28, 31) on them, as on the stock Settings row, whose RGB565 is
+/// 5/11/6 (white reads 160 there, loader menu.rs ROW_BG). #1A1C1F taken literally (0x18E3) came out darker than a stock
+/// widget next to it
+const CARD_BG: u32 = 0x2966;
 const WHITE: u32 = 0xFFFF;
 /// an app widget's title, as the stock cards' grey captions
 const GREY: u32 = 0x9CF3;

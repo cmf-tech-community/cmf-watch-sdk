@@ -377,7 +377,7 @@ One blob of at most `STORE_MAX = 4096` bytes per slot, in `/NAND:/wp2apps/<slot>
 ### Widget (card left of the watch face)
 
 An app can have a widget on the cards left of the watch face: a wide (344×166) stock-looking tile with a grey title
-and a white value, on `#1A1C1F` in the system font. The app only stores the text; the stub draws it.
+and a white value, on the stock card grey in the system font. The app only stores the text; the stub draws it.
 
 | Call | Returns |
 |---|---|
@@ -393,6 +393,8 @@ and a white value, on `#1A1C1F` in the system font. The app only stores the text
 - Declare it: `cmf_wp2_app::app_features!(cmf_wp2_app::WIDGET);` next to `entry!`. The user then adds it on the
   watch: a long press on the app's row in Apps → "Add widget" (again: "Remove widget"). It goes next to other app
   widgets, two per card, or onto a new card at the end; the stock cards stay as they are.
+- On one card it also mixes with stock widgets (from the host or, later, FMC): a card has two rows in list order, a wide
+  widget takes a row, two small ones (class 1 + class 0) share one; a third row is not shown.
 - From the host it is widget `0x40` with param `slot + 1` (`wp2apps list` shows the slot):
   `wp2apps cards set widgets:0x40/1,0x40/2 widgets:0x40/3 --hci-port P` (replaces the whole list). Param `0` is the
   "Apps" tile that opens the menu.

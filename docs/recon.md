@@ -579,7 +579,8 @@ Widget families by tap action (ids are `wgt_reg` indices):
 The stub's widget (`fw/wp2-stub/src/card.rs`): the stub header's last word (reserved, 0 before) points at a
 `wgt_reg` entry for id `0x40`, and `wp2apps firmware` writes it into the free slot `0x101EFD88` (the stock word is
 checked to be 0). "Apps": class 3 (344×166), tap action `0xF0` (the loader menu, opened by the stock tap handler),
-the Custom Apps icon and "Apps" in `font32M` on `#1A1C1F`; the state holds the font and the icon block, delete
+the Custom Apps icon and "Apps" in `font32M` on the stock card grey (RGB565 `0x2966`; the emulator frame reads it as
+`#1A1C1F`, white as `#A0A0A0`); the state holds the font and the icon block, delete
 frees them. The callbacks live in the stub because the loader is in memory only while view `0xF0` is open. The
 host puts the widget on a card with `wp2apps cards add-apps` (or `cards set widgets:0x40`). Nothing X does not
 know id `0x40`; how it shows or rewrites such a list is untested.
@@ -595,6 +596,8 @@ Proven with gdb breakpoints on the stub's callbacks (probe scripts and logs in `
 | Tap action > `0xF4` | the stock handler tail-calls it (`bx r3` at `0x101B1B48`) with **r0 = the container** (`lv_event_get_current_target`), not the event: gdb `TAP obj=0x3806a594 user_data=0x3`, then UART `view_stack: jump 208 -> 240` from the stub's `OPEN_VIEW(0xF0)` | high (emulator) |
 | Card lifecycle | the card view is laid out (delete + create of every widget) when the face shows, not per swipe: face → card → face → card ran create once; a tap into view `0xF0` deleted the widgets, and crown back to the face created them again. So a record read in create is fresh after every app run | high (emulator) |
 | Tile size, grid | two wide (class 3) widgets per card at (61, 61) and (61, 239), 344×166 each | high (emulator frames) |
+| Mixed cards | the stock lays a card out in two rows in list order: a wide (class 3) widget takes a row, class 1 and class 0 share one (left, right). The app widget mixes with stock ones in either order: `0x40/1,0x5d` (app on top of a stock wide), `0x5d,0x40/1`, `0x40/1,0x2e,0x23` (app, then class 1 + 0 below, as the stock `0x19,0x2e,0x23`), `0x2e,0x23,0x40/1`, `0x40/1,0x04` (class 1 alone bottom left). More than two rows (`0x40/1,0x40/2,0x51,0x53`): the third row is not shown, no fault. A tap on the app tile of a mixed card starts the app. Frames `runs/app-widgets/mixed/` (not committed) | high (emulator) |
+| Tile colour | the stock tile is RGB565 `0x2966` (the frame reads 26, 28, 31, as the stock Settings row). The stub first used `0x18E3` (`#1A1C1F` from the frame taken literally), which read (15, 18, 15), visibly darker next to a stock widget | high (emulator frames) |
 
 App widgets (`fw/wp2-stub/src/card.rs`): `param_id` 0 is the "Apps" tile (opens the menu). `N` = 1…8 is the app in
 slot `N − 1`: create reads its 64-byte record `/NAND:/wp2apps/<slot>.wgt` (title at 0, value at 24, NUL-terminated)
