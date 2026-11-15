@@ -1,0 +1,115 @@
+# Release the patched firmware and/or the App Loader to FMC (https://fmc.freethinkel.dev).
+# draft: build, test, check, upload a new unpublished record (tested: emulator); the owner flashes from it.
+# promote (environment fmc-prod, owner's approval): the draft's bytes onto the live record, draft deleted, git tag.
+# The vendor-based firmware image never leaves FMC: no artifact, no release asset (AGENTS.md rule 2).
+# promote reads the image back from the draft and checks its sha256: exactly the bytes the owner flashed.
+name: FMC release
+
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: What to release
+        type: choice
+        options: [firmware, loader, both]
+      description:
+        description: Store description, markdown (\n for a line break; empty keeps the live text; `both` gives it to both records)
+        type: string
+        required: false
+
+concurrency: fmc-release
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      firmware: ${{ steps.publish.outputs.firmware }}
+      firmware_sha256: ${{ steps.publish.outputs.firmware_sha256 }}
+      loader: ${{ steps.publish.outputs.loader }}
+      loader_sha256: ${{ steps.publish.outputs.loader_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      # AGPL, used as an external tool only; the commit pyproject.toml's fwkit pin points at
+      - uses: actions/checkout@v4
+        with:
+          repository: arnav-kr/cmf-watch-utils
+          ref: 0f768dc371dbb15a09ec34c4189e128c83f22e74
+          path: cmf-watch-utils
+      - name: Stock firmware (LFS, this one file only)
+        working-directory: cmf-watch-utils
+        run: |
+          git lfs pull --include dumps/binaries/firmware/JX402_V1.0.0.73.bin
+          sha256sum dumps/binaries/firmware/JX402_V1.0.0.73.bin | grep -q '^30903fc8'
+      - uses: astral-sh/setup-uv@v6
+      - name: Rust
+        run: |
+          rustup target add thumbv7em-none-eabi
+          rustup component add llvm-tools
+          echo "$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin" >> "$GITHUB_PATH"
+      - name: Tests
+        env:
+          CMF_WATCH_UTILS: ${{ github.workspace }}/cmf-watch-utils
+        run: |
+          uv run --locked python -m unittest discover -s tests -v
+          (cd sdk && cargo test --target x86_64-unknown-linux-gnu)
+          (cd fw && cargo test -p wp2-core --target x86_64-unknown-linux-gnu)
+      - name: Build
+        env:
+          CMF_WATCH_UTILS: ${{ github.workspace }}/cmf-watch-utils
+        run: |
+          scripts/build-fw
+          stub=$(grep -oP 'STUB_VERSION: u32 = \K\d+' fw/wp2-core/src/layout.rs)
+          uv run --locked wp2apps ota-image --app target/app-wp2.bin --output target/fw-wp2.bin --version-code $((0x10000 + stub))
+      - name: Draft on FMC
+        id: publish
+        env:
+          FMC_PUBLISHER_EMAIL: ${{ secrets.FMC_PUBLISHER_EMAIL }}
+          FMC_PUBLISHER_PASSWORD: ${{ secrets.FMC_PUBLISHER_PASSWORD }}
+          FMC_DESCRIPTION: ${{ inputs.description }}
+          WHAT: ${{ inputs.what }}
+        run: |
+          FMC_DESCRIPTION=$(printf '%b' "$FMC_DESCRIPTION")
+          # ponytail: with `both`, a refused loader fails the run after the firmware draft is up; that draft
+          # then stays on FMC unpublished until deleted in the admin UI
+          if [ "$WHAT" != loader ]; then
+            id=$(scripts/publish-fmc draft firmware target/fw-wp2.bin)
+            echo "firmware=$id" >> "$GITHUB_OUTPUT"
+            echo "firmware_sha256=$(sha256sum target/fw-wp2.bin | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$WHAT" != firmware ]; then
+            id=$(scripts/publish-fmc draft loader target/loader.wp2app)
+            echo "loader=$id" >> "$GITHUB_OUTPUT"
+            echo "loader_sha256=$(sha256sum target/loader.wp2app | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          fi
+
+  promote:
+    needs: draft
+    runs-on: ubuntu-24.04
+    environment: fmc-prod
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Promote
+        env:
+          FMC_PUBLISHER_EMAIL: ${{ secrets.FMC_PUBLISHER_EMAIL }}
+          FMC_PUBLISHER_PASSWORD: ${{ secrets.FMC_PUBLISHER_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          FIRMWARE: ${{ needs.draft.outputs.firmware }}
+          FIRMWARE_SHA256: ${{ needs.draft.outputs.firmware_sha256 }}
+          LOADER: ${{ needs.draft.outputs.loader }}
+          LOADER_SHA256: ${{ needs.draft.outputs.loader_sha256 }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if [ -n "$FIRMWARE" ]; then
+            tag=$(scripts/publish-fmc promote "$FIRMWARE" "$FIRMWARE_SHA256" out)
+            git tag "$tag" "$GITHUB_SHA" && git push origin "$tag"
+          fi
+          if [ -n "$LOADER" ]; then
+            tag=$(scripts/publish-fmc promote "$LOADER" "$LOADER_SHA256" out)
+            git tag "$tag" "$GITHUB_SHA" && git push origin "$tag"
+            gh release create "$tag" out/loader.wp2app --title "App Loader $tag" --notes "Built from $GITHUB_SHA."
+          fi

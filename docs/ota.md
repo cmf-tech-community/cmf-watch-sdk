@@ -54,3 +54,9 @@ Installed `fw-wp2.bin` (`VERSION_CODE=0x10002`) with the stock client of cmf-wat
   as `Connected` with no client running, the watch stopped advertising, and the next install found nothing.
   Switching the Mac's Bluetooth off and on (`blueutil -p 0; blueutil -p 1`) released it.
 - Turn off the phone's Bluetooth during the update so it does not bind in between.
+
+## Release to FMC
+
+`.github/workflows/fmc-release.yml` (manual run): builds, tests and checks, then uploads a draft record to FMC
+(`scripts/publish-fmc draft`); after the owner flashes from it and approves the `fmc-prod` environment, `promote`
+moves those exact bytes onto the live record and tags the commit (`stub-v<N>`, `loader-<date>-<sha7>`).
