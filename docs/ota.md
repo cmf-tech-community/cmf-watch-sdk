@@ -58,5 +58,7 @@ Installed `fw-wp2.bin` (`VERSION_CODE=0x10002`) with the stock client of cmf-wat
 ## Release to FMC
 
 `.github/workflows/fmc-release.yml` (manual run): builds, tests and checks, then uploads a draft record to FMC
-(`scripts/publish-fmc draft`); after the owner flashes from it and approves the `fmc-prod` environment, `promote`
-moves those exact bytes onto the live record and tags the commit (`stub-v<N>`, `loader-<date>-<sha7>`).
+(`scripts/publish-fmc draft`). A moderator account sees the draft on the site and flashes it from there. When the owner
+approves the `fmc-prod` environment, `promote` reads the image back from the draft, checks its sha256 against the
+draft job's, moves those exact bytes onto the live record and tags the commit (`stub-v<N>`, `loader-<date>-<sha7>`).
+First release this way: `stub-v5` and `loader-2026-11-15-f52cca1`.

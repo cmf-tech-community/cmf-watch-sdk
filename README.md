@@ -86,6 +86,27 @@ Firmware image for OTA: `make fw-ota`, see [docs/ota.md](docs/ota.md).
 
 Nothing gets written to a physical watch without the owner's approval.
 
+## Release to FMC
+
+The patched firmware and the App Loader reach users through the [FMC store](https://fmc.tools) (firmware shelf).
+Releases go through `.github/workflows/fmc-release.yml`, started by hand: Actions → FMC release → Run workflow,
+with `firmware`, `loader` or `both` and an optional store description (markdown, `\n` for a line break; empty keeps
+the live text).
+
+1. **draft** runs the unit tests and `cargo test`, builds the image and `loader.wp2app`, checks them (firmware:
+   `STUB_VERSION` above the live record's `stub`, board `jx402_01_3089c`, `fwkit verify`; loader: a build other than
+   the live one) and uploads a new unpublished record to FMC (`tested: emulator`).
+2. The owner flashes the draft from the site. Drafts show only to FMC accounts with `moderator`, with a Draft badge.
+3. The owner approves the `fmc-prod` environment. **promote** puts the draft's bytes on the live record
+   (`tested: hardware`), deletes the draft and tags the commit: `stub-v<N>` for firmware, `loader-<date>-<sha7>` for the
+   loader. A loader tag also gets a GitHub release with `loader.wp2app`. The firmware image is never attached
+   anywhere: it is based on the vendor's.
+
+A firmware release needs a higher `STUB_VERSION` in `fw/wp2-core/src/layout.rs`: FMC offers the update by that
+number. The loader is matched by its build CRC. CI signs in to FMC as a `publishers` account
+(`FMC_PUBLISHER_EMAIL`, `FMC_PUBLISHER_PASSWORD` secrets) that can only write firmware records. More in
+[docs/ota.md](docs/ota.md#release-to-fmc).
+
 ## Limits
 
 - The patched firmware adds a row to Settings → Vibration between Standard and Off: "Weak" at 35 %
