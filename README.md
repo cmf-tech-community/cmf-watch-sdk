@@ -1,4 +1,4 @@
-# wp2-apps
+# cmf-watch-sdk
 
 Installable apps for the CMF Watch Pro 2, board JX402, stock firmware `1.0.0.73`. A small stub goes
 into the stock firmware, a loader lives on NAND, apps are written in Rust and installed over BLE.

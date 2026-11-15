@@ -1,6 +1,6 @@
 [package]
 name = "cmf-wp2-app"
-description = "SDK for CMF Watch Pro 2 apps loaded by the wp2-apps loader (ABI 1)"
+description = "SDK for CMF Watch Pro 2 apps loaded by the cmf-watch-sdk loader (ABI 1)"
 edition.workspace = true
 license.workspace = true
 version.workspace = true

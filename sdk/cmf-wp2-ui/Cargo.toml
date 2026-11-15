@@ -1,6 +1,6 @@
 [package]
 name = "cmf-wp2-ui"
-description = "UI kit for wp2-apps apps: antialiased shapes, round-screen layout, text, widgets, haptics, motion"
+description = "UI kit for cmf-watch-sdk apps: antialiased shapes, round-screen layout, text, widgets, haptics, motion"
 edition.workspace = true
 license.workspace = true
 version.workspace = true

@@ -1,6 +1,6 @@
 # Writing apps for the watch
 
-How to build an app for the wp2-apps loader (ABI 1 / 1.1 / 1.2) on the CMF Watch Pro 2, JX402 `1.0.0.73`. Read this
+How to build an app for the cmf-watch-sdk loader (ABI 1 / 1.1 / 1.2) on the CMF Watch Pro 2, JX402 `1.0.0.73`. Read this
 before anything else. You should not need `docs/recon*.md`, the plans or agent reports to write an app; file paths
 below point at the code that backs each fact.
 

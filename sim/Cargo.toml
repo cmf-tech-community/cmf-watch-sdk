@@ -1,6 +1,6 @@
 [package]
 name = "wp2-sim"
-description = "Host simulator for wp2-apps apps: the ABI 1.1 Api table on the Mac (docs/app-guide.md, Simulator)"
+description = "Host simulator for cmf-watch-sdk apps: the ABI 1.1 Api table on the Mac (docs/app-guide.md, Simulator)"
 edition = "2024"
 license = "MIT"
 version = "0.1.0"

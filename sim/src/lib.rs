@@ -1,4 +1,4 @@
-//! Host simulator for wp2-apps apps (docs/app-guide.md). The app, built for the host with `--cfg wp2_sim`, calls
+//! Host simulator for cmf-watch-sdk apps (docs/app-guide.md). The app, built for the host with `--cfg wp2_sim`, calls
 //! `wp2_sim_run` from its `main`; this crate fills in the ABI 1.1 `Api` table with the loader's semantics.
 use wp2_core::events::{escape_due, ESCAPE_MS};
 use cmf_wp2_app::{Api, Event, Time, ABI, ABI_MINOR, BUTTON, CROWN, MESSAGE, PAUSE, RESUME, TOUCH_DOWN, TOUCH_UP};

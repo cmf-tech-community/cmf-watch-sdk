@@ -1,6 +1,6 @@
 [package]
 name = "wp2-core"
-description = "Shared no_std logic of the wp2-apps stub and loader"
+description = "Shared no_std logic of the cmf-watch-sdk stub and loader"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
