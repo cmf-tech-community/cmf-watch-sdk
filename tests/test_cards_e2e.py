@@ -1,7 +1,7 @@
 """The stub's Apps widget on the cards left of the watch face (docs/recon.md, "Widget cards"): `wp2apps cards set`
 puts it on the only card over 0x906D, a left swipe from the face shows it, a tap opens the loader menu (view 0xF0),
 and leaving the card runs its delete callback without a fault. Needs target/app-wp2.bin from scripts/build-fw (stub
-version 4) and target/loader.wp2app. Frames go to runs/cards-e2e/."""
+version 5) and target/loader.wp2app. Frames go to runs/cards-e2e/."""
 import json
 import unittest
 from unittest import skipUnless

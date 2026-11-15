@@ -19,6 +19,7 @@ mod device {
 
     cmf_wp2_app::entry!(main);
     cmf_wp2_app::app_icon!();
+    cmf_wp2_app::app_features!(cmf_wp2_app::WIDGET | cmf_wp2_app::PAGE);
 
     const ASK_MS: u32 = 3000;
     const AWAKE_MS: u32 = 20_000;

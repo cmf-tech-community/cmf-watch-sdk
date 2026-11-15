@@ -31,7 +31,7 @@ def cmd_info(args):
         "name": pkg.name, "version": pkg.version, "kind": pkg.kind, "abi": pkg.abi, "abi_minor": pkg.abi_minor,
         "relocs": len(pkg.relocs), "entry": pkg.entry,
         "image_size": len(pkg.image), "crc32": f"{zlib.crc32(pkg.image):#010x}",
-        "icon": icon.parse(pkg.image) is not None,
+        "icon": icon.parse(pkg.image) is not None, "features": package.features(pkg.image),
     }, indent=2))
 
 

@@ -28,6 +28,7 @@ mod view {
     use core::ptr::addr_of_mut;
     use core::sync::atomic::Ordering;
     use wp2_core::events::{escape_due, map_key, Event, BUTTON, CROWN, TOUCH_DOWN, TOUCH_UP};
+    use wp2_core::pkg::{F_PAGE, F_WIDGET};
 
     const PRELOAD: u32 = 2;
     const LAYOUT: u32 = 3;
@@ -57,9 +58,13 @@ mod view {
         asleep: bool,
         // millis() | 1 of the last WAKE
         woke_at: u32,
+        // Some(slot): this view is that app's page next to the face (view 0xF8 + slot, wp2-core cards.rs)
+        page: Option<u8>,
     }
     const ASK_CLOSE: u8 = 1;
     const ASK_DELETE: u8 = 2;
+    const ASK_WIDGET: u8 = 3;
+    const ASK_PAGE: u8 = 4;
 
     // Lives in the loader block: zero again on every open of the view.
     static mut MENU: Menu = Menu {
@@ -73,6 +78,7 @@ mod view {
         scr: core::ptr::null_mut(),
         asleep: false,
         woke_at: 0,
+        page: None,
     };
 
     fn st() -> &'static mut Menu {
@@ -90,11 +96,21 @@ mod view {
                 m.scr = scr;
                 m.entries = menu::scan();
                 menu::lv::build(scr, &m.entries, row_cb, long_cb);
-                launch_widget(m);
+                m.page = wp2_core::cards::page_slot(view_id);
+                app::ON_PAGE.store(m.page.is_some(), Ordering::Release);
+                match m.page {
+                    Some(slot) => launch_page(m, slot),
+                    None => launch_widget(m),
+                }
                 0
             }
             FOCUS | DEFOCUS => {
                 app::DEFOCUSED.store(msg == DEFOCUS, Ordering::Release);
+                let m = st();
+                // an app that ended on its page starts again when the page comes back
+                if let (FOCUS, Some(slot), false) = (msg, m.page, app::running()) {
+                    launch_page(m, slot);
+                }
                 0
             }
             SUSPEND | WAKE => {
@@ -142,10 +158,11 @@ mod view {
     // clock) and the back swipe (view stack pop to the app list) stay with the stock. In an app both are BUTTON.
     fn key(data: *mut c_void) {
         let Some(e) = map_key(unsafe { *(data as *const u32) }) else { return };
-        if !app::running() {
+        let m = st();
+        // on a page the keys stay with the stock, as on any card: the app has no "back"
+        if !app::running() || m.page.is_some() {
             return;
         }
-        let m = st();
         if m.asleep || (m.woke_at != 0 && app::millis().wrapping_sub(m.woke_at) < WAKE_KEY_MS) {
             m.asleep = false; // one key at most: a WAKE that never comes must not eat the button for good
             unsafe { *(data as *mut u8).add(4) = 1 };
@@ -214,36 +231,86 @@ mod view {
         }
     }
 
-    // LONG_PRESSED on a menu row: ask before deleting the app
+    // the app's page (view 0xF8 + slot): start it at once, the stock pauses it (DEFOCUS) while the page is away. An
+    // app that did not declare a page, or no app, leaves the menu
+    fn launch_page(m: &mut Menu, slot: u8) {
+        let Some(row) = m.entries.iter().position(|e| e.is_some_and(|e| e.slot == slot && e.features & F_PAGE != 0))
+        else {
+            return;
+        };
+        m.launched = row;
+        match app::launch(slot) {
+            Ok(()) => show_app(true),
+            Err(code) => fail(row, code),
+        }
+    }
+
+    // LONG_PRESSED on a menu row: what the app declared (widget, page) on or off, delete, cancel
     extern "C" fn long_cb(e: *mut c_void) {
         let row = menu::lv::row_of(e);
         if app::running() {
             return;
         }
         let m = st();
-        if let Some(entry) = m.entries.get(row).copied().flatten() {
-            menu::lv::confirm(m.scr, row, &menu::name_text(&entry), yes_cb, no_cb);
+        let Some(entry) = m.entries.get(row).copied().flatten() else { return };
+        let cards = cards_now();
+        let mut b: [(&[u8], bool, usize); 4] = [(b"", false, 0); 4];
+        let mut n = 0;
+        let at = |ask: u8| usize::from(ask) << 4 | row;
+        if entry.features & F_WIDGET != 0 {
+            let on = wp2_core::cards::has_widget(&cards, entry.slot);
+            b[n] = (if on { b"Remove widget" } else { b"Add widget" }, false, at(ASK_WIDGET));
+            n += 1;
         }
+        if entry.features & F_PAGE != 0 {
+            let on = wp2_core::cards::has_page(&cards, entry.slot);
+            b[n] = (if on { b"Remove page" } else { b"Add page" }, false, at(ASK_PAGE));
+            n += 1;
+        }
+        b[n] = (b"Delete", true, at(ASK_DELETE));
+        b[n + 1] = (b"Cancel", false, at(ASK_CLOSE));
+        menu::lv::confirm(m.scr, &menu::name_text(&entry), &b[..n + 2], sheet_cb);
     }
 
-    extern "C" fn yes_cb(e: *mut c_void) {
+    extern "C" fn sheet_cb(e: *mut c_void) {
         let m = st();
-        (m.answer, m.asked) = (ASK_DELETE, menu::lv::row_of(e));
+        let data = menu::lv::row_of(e);
+        (m.answer, m.asked) = ((data >> 4) as u8, data & 0xF);
     }
 
-    extern "C" fn no_cb(_: *mut c_void) {
-        st().answer = ASK_CLOSE;
+    fn cards_now() -> wp2_core::cards::Cards {
+        unsafe { (wp2_core::stock::CARDS_STORE as *const wp2_core::cards::Cards).read_volatile() }
     }
 
-    // timer: the confirm screen's answer. Delete = the stub's DELETE (package and data files), then the list again.
+    // as the phone's 0x906D set: the settings copy, then store + lay out the cards again
+    fn edit_cards(f: impl FnOnce(&mut wp2_core::cards::Cards)) {
+        let mut c = cards_now();
+        f(&mut c);
+        unsafe { (wp2_core::stock::CARDS_STORE as *mut wp2_core::cards::Cards).write_volatile(c) };
+        stock!(wp2_core::stock::CARDS_SAVE, fn(u32, u32) -> u32)(0xE4, 0);
+    }
+
+    // timer: the sheet's answer. Widget / page = the card list; delete = the stub's DELETE (package and data files)
+    // and the app's cards, then the list again.
     fn answer(m: &mut Menu) {
         let answer = core::mem::take(&mut m.answer);
         if answer == 0 {
             return;
         }
         menu::lv::close_confirm();
-        let Some(entry) = m.entries.get(m.asked).copied().flatten().filter(|_| answer == ASK_DELETE) else { return };
-        use wp2_core::{fs, layout};
+        let Some(entry) = m.entries.get(m.asked).copied().flatten() else { return };
+        use wp2_core::{cards, fs, layout};
+        match answer {
+            // ponytail: a full list (8 cards) just leaves it as it is
+            ASK_WIDGET => return edit_cards(|c| drop(cards::toggle_widget(c, entry.slot))),
+            ASK_PAGE => return edit_cards(|c| drop(cards::toggle_page(c, entry.slot))),
+            ASK_DELETE => {}
+            _ => return,
+        }
+        let c = cards_now();
+        if cards::has_widget(&c, entry.slot) || cards::has_page(&c, entry.slot) {
+            edit_cards(|c| cards::forget(c, entry.slot));
+        }
         fs::unlink(&layout::slot_path(entry.slot, false));
         fs::unlink(&layout::data_path(entry.slot, false));
         fs::unlink(&layout::data_path(entry.slot, true));
@@ -261,7 +328,7 @@ mod view {
         motor::watchdog();
         svc::tick(app::running(), app::paused());
         crate::hr::tick(app::running(), app::paused());
-        hold_face(app::running());
+        hold_face(app::running() && m.page.is_none());
         if app::running() {
             let exited = app::exited();
             let owned = app::OWN_BACK.load(Ordering::Acquire);

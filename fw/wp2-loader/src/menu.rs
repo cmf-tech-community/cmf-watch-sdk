@@ -10,13 +10,15 @@ pub struct Entry {
     pub len: u8,
     pub version: u32,
     pub size: u32,
+    // pkg::F_WIDGET | F_PAGE, read after the icon by scan
+    pub features: u8,
 }
 
 pub fn entry(slot: u8, raw: &[u8; HEADER_SIZE]) -> Option<Entry> {
     let h = parse_header(raw).ok()?;
     check_slot(&h, slot).ok()?;
     let len = h.name.iter().position(|&b| b == 0).unwrap_or(h.name.len()) as u8;
-    Some(Entry { slot, name: h.name, len, version: h.version, size: h.image_size })
+    Some(Entry { slot, name: h.name, len, version: h.version, size: h.image_size, features: 0 })
 }
 
 // Entries are packed from index 0; row i shows entries[i].
@@ -32,9 +34,20 @@ pub fn scan() -> [Option<Entry>; ROWS] {
         }
         let mut raw = [0u8; HEADER_SIZE];
         let ok = fs::read_exact(&mut file, &mut raw);
-        if let Some(e) = entry(slot, &raw).filter(|_| ok) {
+        if let Some(mut e) = entry(slot, &raw).filter(|_| ok) {
+            let mut desc = [0u8; wp2_core::pkg::ICON_DESC];
+            if fs::read_exact(&mut file, &mut desc) {
+                let icon = lv::read_icon(&mut file, &desc, e.size);
+                let mut f = [0u8; wp2_core::pkg::FEATURES];
+                // the declarations follow the icon, or stand at offset 0 without one
+                e.features = if !icon.is_null() {
+                    if fs::read_exact(&mut file, &mut f) { wp2_core::pkg::features(&f) } else { 0 }
+                } else {
+                    wp2_core::pkg::features(&desc)
+                };
+                lv::set_icon(n, icon);
+            }
             out[n] = Some(e);
-            lv::set_icon(n, lv::read_icon(&mut file, e.size));
             n += 1;
         }
         fs::close(&mut file);
@@ -107,6 +120,14 @@ pub const PAD_R: i32 = 28;
 pub const VER_W: i32 = 64;
 pub const NAME_W: i32 = COL_W - TEXT_X - PAD_R - VER_W - 8;
 pub const PAD_BOTTOM: i32 = 466 - TITLE_Y - ROW_H;
+
+// the long-press sheet: title, then buttons top-down (up to four: widget, page, delete, cancel)
+pub const SHEET_TITLE_Y: i32 = 64;
+pub const SHEET_W: i32 = 280;
+pub const SHEET_H: i32 = 72;
+pub const fn sheet_y(i: usize) -> i32 {
+    130 + 84 * i as i32
+}
 
 // "No apps" sits where row 0 would
 #[cfg(test)]
@@ -196,10 +217,9 @@ pub mod lv {
         unsafe { &mut *addr_of_mut!(UI) }
     }
 
-    // The file is positioned at image offset 0. Any failure gives NULL: the row shows the letter.
-    pub fn read_icon(file: &mut fs::File, image_size: u32) -> *mut u8 {
-        let mut desc = [0u8; ICON_DESC];
-        if !fs::read_exact(file, &mut desc) || !icon_ok(&desc, image_size) {
+    // `desc` = image bytes 0..16, the file is positioned after them. Any failure gives NULL: the row shows the letter.
+    pub fn read_icon(file: &mut fs::File, desc: &[u8; ICON_DESC], image_size: u32) -> *mut u8 {
+        if !icon_ok(desc, image_size) {
             return null_mut();
         }
         let block = heap::alloc(RES, BLOCK, 0x40);
@@ -314,9 +334,9 @@ pub mod lv {
         u.bar = bar;
     }
 
-    // The confirm screen over the list: the app's name, a red "Delete" (`yes`) and "Cancel" (`no`), both CLICKED with
-    // `row` as user data. Close it from the timer, not from these callbacks (they run on its own children).
-    pub fn confirm(scr: Obj, row: usize, name: &Text, yes: Cb, no: Cb) {
+    // The action sheet over the list after a long press: the app's name, then one button per (text, red, user data),
+    // all CLICKED to `cb`. Close it from the timer, not from the callback (it runs on its own children).
+    pub fn confirm(scr: Obj, name: &Text, buttons: &[(&[u8], bool, usize)], cb: Cb) {
         let u = ui();
         if u.cont.is_null() || !u.confirm.is_null() {
             return;
@@ -326,14 +346,14 @@ pub mod lv {
         let c = panel(scr, 0, 0, 466, 466, BLACK);
         style(c, LV_STYLE_TEXT_FONT, font, 0);
         style(c, LV_STYLE_TEXT_COLOR, WHITE, 0);
-        let t = label(c, COL_X, 120, COL_W, lh, name);
+        let t = label(c, COL_X, SHEET_TITLE_Y, COL_W, lh, name);
         style(t, LV_STYLE_TEXT_ALIGN, ALIGN_CENTER, 0);
-        for (y, color, text, cb) in [(200, RED, b"Delete" as &[u8], yes), (300, ROW_BG, b"Cancel", no)] {
-            let b = panel(c, 83, y, 300, 84, color);
-            style(b, LV_STYLE_RADIUS, 42, 0);
+        for (i, &(text, red, data)) in buttons.iter().enumerate() {
+            let b = panel(c, (466 - SHEET_W) / 2, sheet_y(i), SHEET_W, SHEET_H, if red { RED } else { ROW_BG });
+            style(b, LV_STYLE_RADIUS, (SHEET_H / 2) as u32, 0);
             style(b, LV_STYLE_BG_COLOR, ROW_PRESSED, STATE_PRESSED);
-            stock!(LV_OBJ_ADD_EVENT_CB, fn(Obj, Cb, u32, usize) -> *mut c_void)(b, cb, CLICKED, row);
-            let l = label(b, 0, (84 - lh) / 2, 300, lh, &self::text(text));
+            stock!(LV_OBJ_ADD_EVENT_CB, fn(Obj, Cb, u32, usize) -> *mut c_void)(b, cb, CLICKED, data);
+            let l = label(b, 0, (SHEET_H - lh) / 2, SHEET_W, lh, &self::text(text));
             style(l, LV_STYLE_TEXT_ALIGN, ALIGN_CENTER, 0);
             stock!(LV_OBJ_CLEAR_FLAG, fn(Obj, u32))(l, FLAG_CLICKABLE);
         }

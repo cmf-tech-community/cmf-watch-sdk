@@ -517,6 +517,12 @@ pub fn widget(buf: &[u8]) -> Option<&[u8; crate::layout::WIDGET_REC]> {
     }
 }
 
+/// PAGE query (op 0x15, handle 0, no payload), alone in a batch: 1 when the app runs as its page next to the watch
+/// face (docs/app-guide.md, "Page"), else 0. On an older loader op 0x15 is `Malformed`.
+pub fn page_query(buf: &[u8]) -> bool {
+    buf == [0x15, 0, 0, 0]
+}
+
 /// SENSOR record (op 0x13, handle 0, payload `[sensor, on]`), alone in a batch: the loader takes it on the app
 /// thread before LVGL, so a canvas app may send it (docs/abi-1.4.md, "Heart rate"). Inside a longer batch, and
 /// on an older loader, op 0x13 is `Malformed` (-22).
@@ -859,6 +865,13 @@ mod tests {
         assert_eq!(v(&[value(1, 193)]), Err(Error::BadValue));
         assert_eq!(v(&[value(2, 0)]), Err(Error::BadClass));
         assert_eq!(v(&[r(1, 4, &[10, 0, 0])]), Err(Error::BadValue), "no class 10");
+    }
+
+    #[test]
+    fn page_query_alone() {
+        assert!(page_query(&[0x15, 0, 0, 0]));
+        assert!(!page_query(&[0x15, 0, 0, 0, 0]));
+        assert!(!page_query(&[0x14, 0, 0, 0]));
     }
 
     #[test]

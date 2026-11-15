@@ -27,6 +27,8 @@ static EXITED: AtomicBool = AtomicBool::new(false);
 static EXIT_CODE: AtomicI32 = AtomicI32::new(0);
 // view msg 8 (defocus) until msg 7 (focus)
 pub static DEFOCUSED: AtomicBool = AtomicBool::new(false);
+// the view is an app's page next to the face (lv_submit PAGE query, wp2-core lvcmd::page_query)
+pub static ON_PAGE: AtomicBool = AtomicBool::new(false);
 // ABI 1.3: the app handles BUTTON itself (own_back); CONSUMED: it popped the last BUTTON
 pub static OWN_BACK: AtomicBool = AtomicBool::new(false);
 pub static CONSUMED: AtomicBool = AtomicBool::new(false);

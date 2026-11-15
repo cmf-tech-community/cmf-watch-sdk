@@ -1,7 +1,7 @@
 """App widgets on the cards left of the watch face (docs/app-guide.md, "Widget"; docs/recon.md, "Widget cards"):
 four example apps, each as widget 0x40/(slot + 1), two wide widgets per card. Before its first run a widget shows
 the package name; a tap starts exactly that app through the loader; the app writes its record on exit and the card
-shows it from the next layout. Needs target/app-wp2.bin (scripts/build-fw, stub version 4), target/loader.wp2app
+shows it from the next layout. Needs target/app-wp2.bin (scripts/build-fw, stub version 5), target/loader.wp2app
 and the four apps (scripts/build-app). Frames go to runs/app-widgets/."""
 import json
 import unittest

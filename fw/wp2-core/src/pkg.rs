@@ -106,6 +106,19 @@ pub const ICON_DESC: usize = 16;
 pub const ICON_SIDE: u32 = 96;
 pub const ICON_BYTES: u32 = ICON_SIDE * ICON_SIDE * 3;
 
+/// The app's declarations (docs/app-guide.md, "Widget" and "Page"): `"WP2F", flags, 0, 0, 0` right after the icon,
+/// or at image offset 0 without one (`cmf_wp2_app::app_features!`). None of it = 0.
+pub const FEATURES: usize = 8;
+pub const F_WIDGET: u8 = 1;
+pub const F_PAGE: u8 = 2;
+
+pub fn features(d: &[u8]) -> u8 {
+    match d {
+        [b'W', b'P', b'2', b'F', f, ..] => *f,
+        _ => 0,
+    }
+}
+
 pub fn icon_ok(desc: &[u8; ICON_DESC], image_size: u32) -> bool {
     let half = |off: usize| u16::from_le_bytes([desc[off], desc[off + 1]]) as u32;
     &desc[..4] == b"WP2I"
@@ -179,6 +192,13 @@ mod tests {
         let mut raw: [u8; 0x40] = GOLDEN[..0x40].try_into().unwrap();
         raw[0x3A] = 1;
         assert!(parse_header(&raw).is_err());
+    }
+
+    #[test]
+    fn feature_record() {
+        assert_eq!(features(b"WP2F\x03\0\0\0"), F_WIDGET | F_PAGE);
+        assert_eq!(features(b"WP2I\x01\x05\0\0"), 0);
+        assert_eq!(features(b"WP2"), 0);
     }
 
     #[test]

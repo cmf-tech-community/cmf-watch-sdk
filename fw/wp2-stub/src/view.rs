@@ -13,7 +13,11 @@ pub extern "C" fn wp2_view_proc(view_id: u32, msg: u32, data: *mut c_void) -> i3
     let ram = stub_ram();
     ram.trace[ram.trace_head as usize % ram.trace.len()] = (msg << 16) | view_id;
     ram.trace_head = ram.trace_head.wrapping_add(1);
+    if msg != PRELOAD && ram.loader_state == 1 && u32::from(ram.loader_view) != view_id {
+        return 0; // a view whose instance another view took over
+    }
     if msg == PRELOAD {
+        ram.loader_view = view_id as u16;
         if ram.loader_state == 1 {
             // a second PRELOAD without DELETE: let the old instance free its framebuffer first
             loader(ram)(view_id, DELETE, core::ptr::null_mut());

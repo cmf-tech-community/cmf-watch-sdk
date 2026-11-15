@@ -16,6 +16,14 @@ class PackageTest(unittest.TestCase):
         self.assertEqual((pkg.name, pkg.version, pkg.kind, pkg.abi, pkg.entry, pkg.image, pkg.relocs),
                          ("Vibration Lab", 3, package.KIND_APP, 1, 0, image, (0, 8)))
 
+    def test_features(self):
+        from wp2apps import icon
+        self.assertEqual(package.features(b"WP2F\x03\0\0\0" + bytes(8)), ["widget", "page"])
+        self.assertEqual(package.features(bytes(16)), [])
+        with_icon = icon.encode(96, 96, bytes(96 * 96 * 4))
+        self.assertEqual(package.features(with_icon + b"WP2F\x02\0\0\0"), ["page"])
+        self.assertEqual(package.features(with_icon), [])
+
     def test_size_limits(self):
         self.assertEqual((package.APP_SIZE, package.LOADER_SIZE), (0x20000, 0x10000))
         package.pack(b"\0" * 16, name="loader", version=1, kind=package.KIND_LOADER)

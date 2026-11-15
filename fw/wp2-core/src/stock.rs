@@ -141,6 +141,10 @@ pub const CMU_PWMCLK: u32 = 0x4000_1068;
 pub const PWM_REGS: u32 = 0x4006_0000;
 
 pub const POPUP_FLAGS: u32 = 0x3800FAF4;
+// The card list left of the face (wp2-core cards.rs): the settings copy the phone's 0x906D set writes, then its
+// `0x100E05EC(0xE4, 0)` (store and lay the cards out again, docs/recon.md "Widget cards")
+pub const CARDS_STORE: u32 = 0x3800_7880;
+pub const CARDS_SAVE: u32 = 0x100E_05ED;
 
 pub const KEY_CROWN_PRESS: u32 = 0x0400_0001;
 pub const KEY_CROWN_CW: u32 = 0xFFFF_006F;

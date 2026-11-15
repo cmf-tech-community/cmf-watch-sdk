@@ -22,6 +22,8 @@ VIEW_TABLE, VIEW_TABLE_END = 0x100004B8, 0x100013E8
 VIEW_START_LITERALS = (0x1018BC24, 0x1018DF3C)
 VIEW_END_LITERALS = (0x1018BC28, 0x1018DF40)
 VIEW_ID = 0xF0
+# an app's own page next to the face: the same view proc, the loader starts slot `id - 0xF8` (wp2-core cards.rs)
+PAGE_VIEWS = range(0xF8, 0x100)
 BOOT_CALL = 0x101884FA
 STOCK_HEAP_INIT = 0x10146AA4
 BLE_CALL = 0x100D34F0
@@ -240,7 +242,8 @@ def add_stub(out: bytearray, stub: bytes) -> None:
     out += bytes(-len(out) % 8)
     table = APP_VBASE + len(out)
     out += out[VIEW_TABLE - APP_VBASE:VIEW_TABLE_END - APP_VBASE]
-    out += struct.pack("<IIIIHHHH", view_name, view_proc, 0, 0, VIEW_ID, 0x102, 466, 466)
+    for view_id in (VIEW_ID, *PAGE_VIEWS):
+        out += struct.pack("<IIIIHHHH", view_name, view_proc, 0, 0, view_id, 0x102, 466, 466)
     if len(out) - STUB_OFFSET > STUB_MAX:
         raise ValueError(f"stub and view table take {len(out) - STUB_OFFSET:#x} bytes; the limit is {STUB_MAX:#x}")
     for lit in VIEW_START_LITERALS:

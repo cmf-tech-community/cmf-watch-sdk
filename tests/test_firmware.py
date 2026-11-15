@@ -128,10 +128,12 @@ class FirmwareTest(unittest.TestCase):
         table = struct.unpack_from("<I", out, 0x1018BC24 - 0x10000000)[0]
         end = struct.unpack_from("<I", out, 0x1018BC28 - 0x10000000)[0]
         self.assertEqual(table % 8, 0)
-        self.assertEqual((end - table) // 0x18, 163)
-        self.assertEqual(out[table - 0x10000000:end - 0x18 - 0x10000000], STOCK[0x4B8:0x13E8])
-        last = out[end - 0x18 - 0x10000000:end - 0x10000000]
-        self.assertEqual(struct.unpack_from("<IIIIHHHH", last), (0x1025A100, 0x1025A0E1, 0, 0, 0xF0, 0x102, 0x1D2, 0x1D2))
+        self.assertEqual((end - table) // 0x18, 162 + 9)  # stock, 0xF0, the pages 0xF8..0xFF
+        ours = end - 9 * 0x18
+        self.assertEqual(out[table - 0x10000000:ours - 0x10000000], STOCK[0x4B8:0x13E8])
+        for i, view_id in enumerate((0xF0, *range(0xF8, 0x100))):
+            entry = out[ours + i * 0x18 - 0x10000000:ours + (i + 1) * 0x18 - 0x10000000]
+            self.assertEqual(struct.unpack_from("<IIIIHHHH", entry), (0x1025A100, 0x1025A0E1, 0, 0, view_id, 0x102, 0x1D2, 0x1D2))
         self.assertEqual(struct.unpack_from("<I", out, 0x1018DF3C - 0x10000000)[0], table)
         self.assertEqual(struct.unpack_from("<I", out, 0x1018DF40 - 0x10000000)[0], end)
         # neighbouring tables that merely share a bound with the view table (docs/recon.md)

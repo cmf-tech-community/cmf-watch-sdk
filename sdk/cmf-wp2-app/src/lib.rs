@@ -208,6 +208,17 @@ impl Api {
         (self.lv_submit)(buf.as_ptr(), buf.len())
     }
 
+    /// `true` when the app runs as its page next to the watch face (`app_features!(PAGE)`, docs/app-guide.md "Page"),
+    /// `false` in the Apps menu and on a loader without pages. On a page the crown and the button stay with the
+    /// watch (no BUTTON), and swiping away gives PAUSE, back RESUME.
+    pub fn on_page(&self) -> bool {
+        if self.abi_minor < 2 {
+            return false;
+        }
+        static mut BUF: [u8; 4] = [0x15, 0, 0, 0];
+        (self.lv_submit)(unsafe { core::ptr::addr_of!(BUF) } as *const u8, 4) == 1
+    }
+
     /// ABI 1.3: `true` = this app handles BUTTON ("back") itself and exits by returning; the loader then stops it
     /// only if it leaves a BUTTON unread for 1 s (hung). A no-op on an older loader.
     pub fn own_back(&self, on: bool) {
@@ -318,6 +329,31 @@ macro_rules! app_icon {
 #[macro_export]
 macro_rules! app_icon {
     () => {};
+}
+
+/// `app_features!` flag: the app has a widget for the cards left of the watch face (`Api::widget`); the Apps menu
+/// offers "Add widget" on a long press.
+pub const WIDGET: u8 = 1;
+/// `app_features!` flag: the app can run as its own page next to the watch face (`Api::on_page`); the Apps menu
+/// offers "Add page".
+pub const PAGE: u8 = 2;
+
+/// Declares what the app offers beyond its menu row: `app_features!(cmf_wp2_app::WIDGET | cmf_wp2_app::PAGE);`
+/// (docs/app-guide.md, "Widget" and "Page"). Placed after the icon.
+#[cfg(not(wp2_sim))]
+#[macro_export]
+macro_rules! app_features {
+    ($flags:expr) => {
+        #[used]
+        #[unsafe(link_section = ".wp2info.features")]
+        static WP2_FEATURES: [u8; 8] = [b'W', b'P', b'2', b'F', $flags, 0, 0, 0];
+    };
+}
+
+#[cfg(wp2_sim)]
+#[macro_export]
+macro_rules! app_features {
+    ($flags:expr) => {};
 }
 
 #[cfg(target_os = "none")]

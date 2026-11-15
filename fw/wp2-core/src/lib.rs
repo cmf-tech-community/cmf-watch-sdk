@@ -1,6 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 
 pub mod aes;
+pub mod cards;
 pub mod chan;
 pub mod events;
 pub mod font8x8;

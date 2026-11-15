@@ -18,6 +18,18 @@ LOADER_SIZE = 0x10000
 NAME_BYTES = 23
 
 
+WIDGET, PAGE = 1, 2  # app_features! flags (sdk cmf-wp2-app, wp2-core pkg.rs)
+
+
+def features(image: bytes) -> list[str]:
+    """What the app declared with app_features!: the record after the icon, or at offset 0 without one."""
+    at = 0
+    if icon.parse(image) is not None:
+        at = icon.DESC.size + icon.SIDE * icon.SIDE * 3
+    flags = image[at + 4] if image[at:at + 4] == b"WP2F" and len(image) > at + 4 else 0
+    return [name for bit, name in ((WIDGET, "widget"), (PAGE, "page")) if flags & bit]
+
+
 @dataclass(frozen=True)
 class Package:
     kind: int

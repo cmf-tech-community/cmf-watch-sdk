@@ -7,6 +7,7 @@
 use cmf_wp2_app::{Api, BUTTON, CROWN, HEART, TOUCH_DOWN};
 
 cmf_wp2_app::entry!(main);
+cmf_wp2_app::app_features!(cmf_wp2_app::WIDGET);
 
 // [heart_rate() result, HEART events, last delta, last x]; non-zero initialiser: in .data, fresh at every launch
 #[unsafe(no_mangle)]

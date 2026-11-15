@@ -10,7 +10,8 @@ pub const LOADER_ABI_MINOR: u16 = 3;
 // header's `version`: that one is the header format, which `wp2apps firmware` checks is 1.
 // 3 = the Apps widget in wgt_reg slot 0x40 (docs/recon.md, "Widget cards")
 // 4 = app widgets: 0x40 with param_id slot + 1 shows the app's record and launches it on a tap
-pub const STUB_VERSION: u32 = 4;
+// 5 = app pages: views 0xF8 + slot run the loader too, which starts that app (cards.rs)
+pub const STUB_VERSION: u32 = 5;
 // INFO for this slot answers the stub's version instead of a package header; an older stub answers BadRequest
 pub const STUB_SLOT: u8 = 0xFE;
 pub const STUB_RAM: u32 = 0x3871_EEC0;
@@ -103,6 +104,9 @@ pub struct StubRam {
     pub kick: u32,
     // 1 while a thread runs the stub's frame path (reply buffer, outbox consumer)
     pub busy: core::sync::atomic::AtomicU8,
+    // the view the loaded loader belongs to: 0xF0 (menu) or 0xF8 + slot (an app's page, cards.rs). Messages of another
+    // view while it is loaded are ignored, so a page left behind cannot delete the instance a later view took over
+    pub loader_view: u16,
 }
 
 pub const KICK_MAGIC: u32 = 0x4B43_494B; // "KICK"
