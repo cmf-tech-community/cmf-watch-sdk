@@ -33,7 +33,8 @@ RECORDS = "/api/collections/firmwares/records"
 
 
 def call(method, path, token="", fields=None, image=None, body=None):
-    headers, data = {"Authorization": token}, None
+    # Cloudflare in front of FMC answers 403 (error 1010) to the default Python-urllib agent
+    headers, data = {"Authorization": token, "User-Agent": "cmf-watch-sdk-fmc-release"}, None
     if body is not None:
         data, headers["Content-Type"] = json.dumps(body).encode(), "application/json"
     elif fields is not None:
