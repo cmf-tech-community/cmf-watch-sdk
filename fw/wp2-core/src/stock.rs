@@ -179,6 +179,14 @@ pub const APP_SECRET: &[u8] = b"APP_SECRET\0";
 // change_hr_mode (u32 1 on, 0 off), as the stock heart view (0x1006F20C) sets it.
 pub const UX2SYS_SET: u32 = 0x100E_07B9;
 pub const PROP_HR_MODE: u32 = 0x02;
+// (prop, *out): the ux2sys getter (0x100E082C), as the stock music view and workout screen read media state
+// (docs/abi-1.4.md, "Music"). Values are u32 but 0x4F (0x82 B: title [0..0x40], artist [0x41..0x81]).
+pub const UX2SYS_GET: u32 = 0x100E_082D;
+pub const PROP_PHONE_LINK: u32 = 0x31;
+pub const PROP_MEDIA_AVAILABLE: u32 = 0x4C;
+pub const PROP_MEDIA_PLAYING: u32 = 0x4D;
+pub const PROP_MEDIA_CMD: u32 = 0x4E;
+pub const PROP_MEDIA_INFO: u32 = 0x4F;
 // u8: non-zero = on the wrist (ux2sys 0x13; its getter logs every call, so the loader reads the byte)
 pub const HR_WEAR: u32 = 0x3804_B30C;
 // u8 owner of the HR mode: 0 none, 1 property 2 (heart view, an app), 2 a stock workout (0x100C9434)

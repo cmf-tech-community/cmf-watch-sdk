@@ -15,7 +15,7 @@ S = harness.STUB_RAM
 RUNNING = S + 6
 ELF = paths.ROOT / "sdk/target/thumbv7em-none-eabi/release/ui-gallery"
 OUT = paths.ROOT / "runs" / "pager"
-RC, OPEN, OPENED, TICKS, PAGE = range(5)  # STATS, ui-gallery main.rs
+RC, OPEN, OPENED, TICKS, PAGE, BIND, MEDIAS, MEDIA_STATE, KEY = range(9)  # STATS, ui-gallery main.rs
 PAGES = 6  # screens::PAGES
 NEXT, PREV = "r -80", "r 80"  # crown: down the content / up
 
@@ -35,7 +35,7 @@ class PagerTest(unittest.TestCase):
 
             def stats():
                 at = harness.u32(emu, S + harness.APP_BLOCK_OFF) + harness.symbol(ELF, "STATS")
-                return struct.unpack("<5i", emu.peek(at, 20))
+                return struct.unpack("<9i", emu.peek(at, 36))
 
             def frame(name):
                 w, h, rgb = emu.frame()
@@ -107,6 +107,75 @@ class PagerTest(unittest.TestCase):
             (OUT / "tmp.png").unlink(missing_ok=True)
             uart = emu.uart()
             self.assertNotIn("MllcFailedHook", uart)
+            self.assertNotIn("ZEPHYR FATAL ERROR", uart)
+            self.assertEqual(uart.count("*** Booting Zephyr"), 1, "guest rebooted")
+
+
+    def test_hpager(self):
+        """The horizontal pager (`stock::hpager`, the stock workout screen's layout): swipes left/right page, the right
+        back swipe stays with the pager (no BUTTON, the app runs on), the crown press still leaves. Music: the bind
+        answers 0 and sends one MEDIA; with no phone media in the emulator a command answers -19."""
+        OUT.mkdir(parents=True, exist_ok=True)
+        with harness.installed(["loader", "ui-gallery"], name="hpager") as (emu, port):
+            async def send(text):
+                async with session(port) as s:
+                    await unpaused(s)
+                    await channel.send(s, text)
+
+            async def bind():
+                async with session(port):
+                    pass
+
+            asyncio.run(bind())
+            harness.open_app(emu, row=0)
+            self.assertEqual(emu.peek(RUNNING, 1), b"\x00", "ui-gallery did not start")
+
+            def stats():
+                at = harness.u32(emu, S + harness.APP_BLOCK_OFF) + harness.symbol(ELF, "STATS")
+                return struct.unpack("<9i", emu.peek(at, 36))
+
+            emu.sleep(1)
+            asyncio.run(send(b"!hpager"))
+            for _ in range(40):
+                if stats()[BIND] != -1:
+                    break
+                emu.sleep(0.25)
+            emu.sleep(2)
+            st = stats()
+            self.assertEqual((st[RC], st[BIND], st[PAGE]), (0, 0, 0), st)
+            self.assertEqual((st[MEDIAS], st[MEDIA_STATE]), (1, 0), "one MEDIA at the bind: not playing, no media")
+            w, h, rgb = emu.frame()
+            save_png(OUT / "h0.png", w, h, rgb)
+
+            def swipe(x0, x1):
+                mark = len(emu.uart())
+                harness.swipe(emu, x0, 233, x1, 233, steps=8, pause=2.5)
+                return emu.uart()[mark:]
+
+            swipe(400, 60)
+            self.assertEqual(stats()[PAGE], 1, "swipe left did not page")
+            swipe(400, 60)
+            self.assertEqual(stats()[PAGE], 2)
+            w, h, rgb = emu.frame()
+            save_png(OUT / "h2.png", w, h, rgb)
+            uart = swipe(60, 420)  # the right swipe: pages back, no BUTTON
+            print("\nUART of the right swipe:", [l for l in uart.splitlines() if "key" in l.lower() or "back" in l.lower()])
+            self.assertEqual(emu.peek(RUNNING, 1), b"\x00", "the right swipe left the app")
+            self.assertEqual(stats()[PAGE], 1, "swipe right did not page")
+            swipe(60, 420)
+            self.assertEqual(stats()[PAGE], 0)
+            swipe(60, 420)  # at the first page: the swipe is still no BUTTON
+            self.assertEqual(emu.peek(RUNNING, 1), b"\x00", "the right swipe on page 1 left the app")
+            self.assertEqual(stats()[PAGE], 0)
+
+            asyncio.run(send(b"!key 2"))
+            emu.sleep(1.5)
+            self.assertEqual(stats()[KEY], -19, "no phone media: ENODEV")
+            self.assertEqual(stats()[MEDIAS], 1, "MEDIA without a change")
+
+            emu.send("c 1", "c 0", pause=3)  # crown press: BUTTON, ui-gallery returns
+            self.assertEqual(emu.peek(RUNNING, 1), b"\xff", "the crown press did not leave")
+            uart = emu.uart()
             self.assertNotIn("ZEPHYR FATAL ERROR", uart)
             self.assertEqual(uart.count("*** Booting Zephyr"), 1, "guest rebooted")
 

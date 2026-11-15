@@ -301,7 +301,7 @@ have ~5 ms granularity (`next_event` in `fw/wp2-loader/src/app.rs`). Never spin 
 | `TOUCH_DOWN` (1) | finger down | `x`, `y` in screen pixels. Act on this one |
 | `TOUCH_UP` (2) | finger up | `x`, `y` are not reliable: in the emulator a tap at y 199 reported a row-0 `y` (herdr-agents now uses DOWN). There are no move events, so no drags or swipes inside the app |
 | `CROWN` (3) | one crown detent | `delta` is `+1` or `-1`, never a magnitude; a fast turn is several events |
-| `BUTTON` (4) | crown press, or a right swipe (the stock "back") | The loader force-stops the app **1000 ms** later if it is still running (`ESCAPE_MS`, `wp2_core::events::escape_due`). Turn the motor off, save if needed, return. ABI 1.3: after `own_back(true)` it is an ordinary event and the app exits by returning; a `BUTTON` left unread for 1000 ms still force-stops it (`docs/abi-1.3.md`) |
+| `BUTTON` (4) | crown press, or a right swipe (the stock "back") | The loader force-stops the app **1000 ms** later if it is still running (`ESCAPE_MS`, `wp2_core::events::escape_due`). Turn the motor off, save if needed, return. ABI 1.3: after `own_back(true)` it is an ordinary event and the app exits by returning; a hung app (no `BUTTON` read and no `next_event` call for 5000 ms, loader of 2026-11-16) still is force-stopped (`docs/abi-1.3.md`, `docs/abi-1.4.md`). While a horizontal pager lives the right swipe is no `BUTTON` |
 | `PAUSE` (5) | a stock popup (charger, incoming call, "Paired"; notifications use the call's popup type, untested) or another view covers the app | The queue is cleared, input is dropped, `vibrate` returns `-3` and the motor is cut, `show` does not reach the panel, host messages are refused with `PAUSED`. Stop the motor and animations, then block in `event(u32::MAX)` until `RESUME` (handle `BUTTON` there too, as `paused()` in agent-glow and herdr-agents does) |
 | `RESUME` (6) | the popup closed | The loader repaints the whole framebuffer itself. Redraw time-dependent parts; ask the host for a fresh snapshot |
 | `MESSAGE` (7) | ABI 1.1: a host message is in the inbox | `x` = its length. A hint: drain with `recv` until `None` |
@@ -371,6 +371,8 @@ One blob of at most `STORE_MAX = 4096` bytes per slot, in `/NAND:/wp2apps/<slot>
 |---|---|---|
 | `battery() -> Option<Battery>` | `percent` (the stock estimate), `charging`, `full`, `charger` | `None` on a driver error |
 | `own_back(on: bool)` (1.3) | – | The app handles `BUTTON` itself ("back", an exit dialog); see `BUTTON` above and `docs/abi-1.3.md`. No-op on an older loader |
+| `media_key(cmd: u8) -> i32` | `-22` | Phone music: `MEDIA_PLAY`, `MEDIA_PAUSE`, `MEDIA_PREV`, `MEDIA_NEXT`. `0`, `-19` with no phone link or media (`docs/abi-1.4.md`, "Music") |
+| `media_bind(title: Option<lv::Obj>, artist: Option<lv::Obj>) -> i32` | `-22` | The loader writes the phone's track into these labels once a second and sends `MEDIA` (`x` playing, `y` available) at the bind and on change; `media_unbind()` stops it. Unbind before deleting the labels |
 | `heart_rate(on: bool) -> i32` | `0`, `-22` on an older loader | Starts or stops the stock heart-rate measurement for `HEART` events. Held only while the app runs and is not paused; stopped on pause, exit, crash, force stop and view delete; started again on resume. Costs battery (the PPG LED). Works in canvas and LVGL apps; `docs/abi-1.4.md`, "Heart rate" |
 | `keep_screen_on(on: bool)` | – | Records the wish; the next UI tick takes or drops the stock wake lock. Held only while the app runs and is not paused; dropped on pause, exit, crash, force stop and view delete; taken again on resume. Costs display power: hold it with a deadline (herdr-agents: 20 s after a buzz) |
 
@@ -825,6 +827,15 @@ No borders (`BorderWidth` > 0): on a rounded object they stop the emulator (its 
 watch is untested), so draw an outline as a pill inside a pill (ui-gallery's "More").
 
 Do not pick other fonts or colours unless the owner asks for them.
+
+### Horizontal pager
+
+`stock::hpager::<N>(&mut b, n)` builds the stock workout screen's layout: `n` full-screen pages side by side
+(`HPager { obj, pages, at, n }`), one page per swipe left/right. Fill `pages[i]` like any parent; feed every event
+to `HPager::event` (it returns the page it settled on); `go(i)` glides, `jump(i)` shows at once. The crown stays
+with the app (CROWN events). While a horizontal pager lives the right swipe pages back and is **not** `BUTTON`:
+the app leaves with the crown press. Loader of 2026-11-16 (`docs/abi-1.4.md`, "Horizontal pager"); an older loader
+answers `-22` at `create`. ui-gallery's `!hpager` is the example.
 
 ### LVGL or `cmf-wp2-ui`?
 

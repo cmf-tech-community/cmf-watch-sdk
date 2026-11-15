@@ -1,6 +1,7 @@
 //! ui-gallery: the watch's own widgets (ABI 1.2, LVGL) in the stock look: a stock focus list of sections (lists,
 //! buttons, switches, gauges, a time picker, the stock fonts); a section opens on a tap and goes back with its
-//! title or "Back". The crown scrolls. "Pages" is the vertical pager (`stock::pager`). Host messages for tests/test_gallery_e2e.py: `!open N`, `!menu`.
+//! title or "Back". The crown scrolls. "Pages" is the vertical pager (`stock::pager`). Host messages for tests/test_gallery_e2e.py: `!open N`, `!menu`;
+//! for tests/test_pager_e2e.py `!hpager` (the horizontal pager with music labels), `!key N` (media_key).
 #![cfg_attr(target_os = "none", no_std, no_main)]
 
 #[cfg_attr(not(target_os = "none"), allow(dead_code))]
@@ -13,7 +14,7 @@ fn main() {}
 mod device {
     use crate::screens::{self, Screen, N};
     use cmf_wp2_app::lv::{Batch, LvError};
-    use cmf_wp2_app::{Api, BUTTON, LV, MESSAGE, MSG_MAX, PAUSE};
+    use cmf_wp2_app::{Api, BUTTON, LV, MEDIA, MESSAGE, MSG_MAX, PAUSE};
     use cmf_wp2_ui::haptic::{Motor, TICK};
 
     cmf_wp2_app::entry!(main);
@@ -28,9 +29,14 @@ mod device {
     const OPENED: usize = 2;
     const TICKS: usize = 3;
     const PAGE: usize = 4;
+    // !hpager: media_bind result, MEDIA events, last MEDIA (x | y << 1), last media_key result
+    const BIND: usize = 5;
+    const MEDIAS: usize = 6;
+    const MEDIA_STATE: usize = 7;
+    const KEY: usize = 8;
     // non-zero: in .data, fresh at every launch; RC 1 until the menu is built
     #[unsafe(no_mangle)]
-    static mut STATS: [i32; 5] = [1, 0, 0, 0, 0];
+    static mut STATS: [i32; 9] = [1, 0, 0, 0, 0, -1, 0, -1, 1];
 
     fn set(i: usize, v: i32) {
         unsafe { (&raw mut STATS[i]).write_volatile(v) }
@@ -66,6 +72,7 @@ mod device {
         // a screen to switch to after the events of this turn: None stays, Some(None) the menu, Some(Some(i))
         let mut go: Option<Option<usize>>;
         let mut msg = [0u8; MSG_MAX];
+        let mut hp = false;
         loop {
             go = None;
             motor.update();
@@ -73,6 +80,15 @@ mod device {
             match e.kind {
                 BUTTON => break,
                 PAUSE => motor.off(),
+                MEDIA => {
+                    set(MEDIAS, get(MEDIAS) + 1);
+                    set(MEDIA_STATE, i32::from(e.x) | i32::from(e.y) << 1);
+                }
+                LV if s.hpager.is_some_and(|p| p.obj.0 == e.x as u16) => {
+                    if let Some(i) = s.hpager.as_mut().and_then(|p| p.event(&e)) {
+                        set(PAGE, i as i32);
+                    }
+                }
                 LV if s.pager.is_some_and(|p| p.page(&e).is_some()) => {
                     if let Some(p) = s.pager.as_mut() {
                         if let Ok(Some(i)) = p.event(&mut b, &e) {
@@ -117,6 +133,8 @@ mod device {
                     while let Some(m) = api.recv(&mut msg) {
                         match m {
                             b"!menu" => go = Some(None),
+                            b"!hpager" => hp = true,
+                            [b'!', b'k', b'e', b'y', b' ', d] => set(KEY, api.media_key(d.wrapping_sub(b'0'))),
                             [b'!', b'o', b'p', b'e', b'n', b' ', d] if (*d as usize) >= b'0' as usize
                                 && ((*d - b'0') as usize) < N => go = Some(Some((*d - b'0') as usize)),
                             _ => {}
@@ -125,7 +143,21 @@ mod device {
                 }
                 _ => {}
             }
+            if core::mem::take(&mut hp) {
+                match screens::leave(&mut b, &s).and_then(|_| screens::hpages(&mut b)) {
+                    Ok(next) => {
+                        s = next;
+                        set(RC, code(b.submit(&lv)));
+                        set(PAGE, 0);
+                        set(BIND, api.media_bind(Some(s.media[0]), Some(s.media[1])));
+                    }
+                    Err(e) => set(RC, code(Err(e))),
+                }
+            }
             if let Some(to) = go {
+                if s.hpager.is_some() {
+                    api.media_unbind(); // its labels go away
+                }
                 let r = screens::leave(&mut b, &s).and_then(|_| match to {
                     None => screens::menu(&mut b, &mut flush),
                     Some(i) => screens::section(&mut b, &mut flush, i),

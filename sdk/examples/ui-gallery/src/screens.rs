@@ -45,6 +45,9 @@ pub struct Screen {
     pub minutes: Obj,
     pub picked: Obj,
     pub pager: Option<stock::Pager<3>>,
+    pub hpager: Option<stock::HPager<3>>,
+    /// `!hpager`: the labels the loader writes the phone's track into
+    pub media: [Obj; 2],
 }
 
 const EMPTY: Screen = Screen {
@@ -63,6 +66,8 @@ const EMPTY: Screen = Screen {
     minutes: ROOT,
     picked: ROOT,
     pager: None,
+    hpager: None,
+    media: [ROOT; 2],
 };
 
 fn room(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError>) -> Result<(), LvError> {
@@ -380,6 +385,25 @@ fn pages(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError
     b.style(big, Prop::TextFont, 0, F48 as i32)?;
     b.text(big, "3 / 3")?;
     s.back[1] = button(b, three, "Back", Kind::Secondary)?;
+    Ok(s)
+}
+
+/// `!hpager` (tests/test_pager_e2e.py): a horizontal pager as the stock workout screen, three pages "1"…"3"; page 2
+/// holds the track title and artist labels for `media_bind`. Leave with the crown press.
+pub fn hpages(b: &mut Batch) -> Result<Screen, LvError> {
+    let p = stock::hpager::<3>(b, 3)?;
+    let mut s = Screen { page: p.obj, hpager: Some(p), ..EMPTY };
+    for (i, page) in p.pages.into_iter().enumerate() {
+        pager_page(b, page, 0)?;
+        stock::title(b, page, ["Workout", "Music", "Last"][i])?;
+        let big = b.create(Class::Label, page)?;
+        b.style(big, Prop::TextFont, 0, F48 as i32)?;
+        b.text(big, ["1", "2", "3"][i])?;
+    }
+    for (k, text) in ["No title", "No artist"].into_iter().enumerate() {
+        s.media[k] = b.create(Class::Label, p.pages[1])?;
+        b.text(s.media[k], text)?;
+    }
     Ok(s)
 }
 

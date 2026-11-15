@@ -1,6 +1,6 @@
 //! Host simulator for cmf-watch-sdk apps (docs/app-guide.md). The app, built for the host with `--cfg wp2_sim`, calls
 //! `wp2_sim_run` from its `main`; this crate fills in the ABI 1.1 `Api` table with the loader's semantics.
-use wp2_core::events::{escape_due, ESCAPE_MS};
+use wp2_core::events::{escape_due, ESCAPE_MS, HANG_MS};
 use cmf_wp2_app::{Api, Event, Time, ABI, ABI_MINOR, BUTTON, CROWN, MESSAGE, PAUSE, RESUME, TOUCH_DOWN, TOUCH_UP};
 use std::collections::VecDeque;
 use std::io::{BufRead, Read, Write};
@@ -233,6 +233,8 @@ pub struct State {
     // ABI 1.3: the app owns BUTTON; consumed = it popped the pending one
     owned: bool,
     consumed: bool,
+    // now() of the app's last next_event call: a busy owner is not hung (escape_due)
+    event_at: u32,
     timeline: VecDeque<(u32, Action)>,
     pub end: Option<End>,
     pub sent: VecDeque<String>,
@@ -270,6 +272,7 @@ impl State {
             button_at: None,
             owned: false,
             consumed: false,
+            event_at: 0,
             end: None,
             sent: VecDeque::new(),
             log,
@@ -315,7 +318,7 @@ impl State {
             self.locked = true;
             self.log("motor_cut", &[("reason", V::S("cap"))]);
         }
-        if self.button_at.is_some_and(|b| escape_due(self.owned, b.max(1), self.consumed, now)) {
+        if self.button_at.is_some_and(|b| escape_due(self.owned, b.max(1), self.consumed, self.event_at, now)) {
             self.finish(End::Killed);
         }
         if self.cfg.until.is_some_and(|u| now >= u) {
@@ -328,7 +331,9 @@ impl State {
         [
             self.timeline.front().map(|(t, _)| *t),
             (self.since != 0).then(|| self.since + TRIP_MS),
-            self.button_at.filter(|_| !(self.owned && self.consumed)).map(|b| b + ESCAPE_MS),
+            self.button_at
+                .filter(|_| !(self.owned && self.consumed))
+                .map(|b| if self.owned { b.max(self.event_at) + HANG_MS } else { b + ESCAPE_MS }),
             (!self.outbox.is_empty()).then(|| self.polled + POLL_MS),
             self.cfg.until,
         ]
@@ -640,6 +645,7 @@ impl Sim {
         loop {
             st.pump();
             let now = st.now();
+            st.event_at = now;
             if st.end.is_some() {
                 return None;
             }

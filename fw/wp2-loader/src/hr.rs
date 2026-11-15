@@ -4,6 +4,7 @@
 use crate::app::{millis, QUEUE};
 use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use wp2_core::events::Event;
 use wp2_core::heart::{self, Heart, SENSOR_HEART};
 use wp2_core::stock::{HR_BPM, HR_OWNER, HR_WEAR, PROP_HR_MODE, UX2SYS_SET};
 
@@ -50,13 +51,16 @@ pub fn tick(running: bool, paused: bool) {
     }
 }
 
-// app thread (next_event): a HEART event every EMIT_MS while it measures, lit or dark
-pub fn emit() {
+// app thread (next_event): a HEART event every EMIT_MS while it measures, lit or dark (the UI tick stops with the
+// panel). Handed to the app directly: QUEUE has one producer, the UI thread, and a coalesce from here could
+// overwrite an event it just pushed.
+pub fn due() -> Option<Event> {
     let now = millis();
-    if ON.load(Ordering::Acquire) && now.wrapping_sub(EMIT_AT.load(Ordering::Relaxed)) >= heart::EMIT_MS {
-        EMIT_AT.store(now, Ordering::Relaxed);
-        QUEUE.coalesce(heart::event(byte(HR_WEAR), byte(HR_BPM)));
+    if !ON.load(Ordering::Acquire) || now.wrapping_sub(EMIT_AT.load(Ordering::Relaxed)) < heart::EMIT_MS {
+        return None;
     }
+    EMIT_AT.store(now, Ordering::Relaxed);
+    Some(heart::event(byte(HR_WEAR), byte(HR_BPM)))
 }
 
 // UI thread, app thread aborted

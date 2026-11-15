@@ -25,6 +25,15 @@ pub const LV: u8 = 8;
 /// Heart rate, about once a second after [`Api::heart_rate`]`(true)`: `delta` = beats per minute, 0 = no reading
 /// yet or off the wrist; `x` = 1 on the wrist, 0 off. Personal data: do not log it or send it unasked.
 pub const HEART: u8 = 9;
+/// Phone music state after [`Api::media_bind`], once at the bind and on every change: `x` = 1 playing, `y` = 1 the
+/// phone is linked and has media to control (loader of 2026-11-16).
+pub const MEDIA: u8 = 10;
+
+/// [`Api::media_key`] commands, as the stock music controls send them. No volume.
+pub const MEDIA_PLAY: u8 = 1;
+pub const MEDIA_PAUSE: u8 = 2;
+pub const MEDIA_PREV: u8 = 3;
+pub const MEDIA_NEXT: u8 = 4;
 
 /// SENSOR records for `lv_submit` (docs/abi-1.4.md, "Heart rate"); statics, so they lie in the app block.
 #[doc(hidden)]
@@ -190,6 +199,46 @@ impl Api {
         }
         let r = if on { HEART_ON } else { HEART_OFF };
         (self.lv_submit)(r.as_ptr(), r.len())
+    }
+
+    /// Sends a music command to the phone ([`MEDIA_PLAY`], [`MEDIA_PAUSE`], [`MEDIA_PREV`], [`MEDIA_NEXT`]), as the
+    /// stock music controls do. `0`; `-19` when the phone is not linked or has no media; `-22` for another value
+    /// and on a loader older than 2026-11-16. Waits for the loader's UI tick: with the panel dark it returns once it
+    /// is lit again.
+    pub fn media_key(&self, cmd: u8) -> i32 {
+        if self.abi_minor < 2 {
+            return -22;
+        }
+        static mut BUF: [u8; 5] = [0x16, 1, 0, 0, 0];
+        let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
+        buf[4] = cmd;
+        (self.lv_submit)(buf.as_ptr(), buf.len())
+    }
+
+    /// Has the loader show the phone's track in two labels (`title`, `artist`; `None` = not shown): it writes them
+    /// once a second while the app runs in the foreground, and sends [`MEDIA`] at once and on every change of
+    /// playing/available. Call again to change the labels; [`Api::media_unbind`] stops it (the app's exit does
+    /// too). `0`; `-22` for a handle that is not a live label, before the first LVGL batch, and on a loader older
+    /// than 2026-11-16.
+    pub fn media_bind(&self, title: Option<lv::Obj>, artist: Option<lv::Obj>) -> i32 {
+        self.media_record(true, title.map_or(0, |o| o.0), artist.map_or(0, |o| o.0))
+    }
+
+    /// Stops [`Api::media_bind`]: the labels keep their last text, no more [`MEDIA`] events.
+    pub fn media_unbind(&self) -> i32 {
+        self.media_record(false, 0, 0)
+    }
+
+    fn media_record(&self, on: bool, title: u16, artist: u16) -> i32 {
+        if self.abi_minor < 2 {
+            return -22;
+        }
+        static mut BUF: [u8; 9] = [0x17, 5, 0, 0, 0, 0, 0, 0, 0];
+        let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
+        buf[4] = on.into();
+        buf[5..7].copy_from_slice(&title.to_le_bytes());
+        buf[7..9].copy_from_slice(&artist.to_le_bytes());
+        (self.lv_submit)(buf.as_ptr(), buf.len())
     }
 
     /// The app's widget on the cards left of the watch face (`wp2apps cards set widgets:0x40/<slot + 1>`): a
@@ -454,6 +503,24 @@ mod tests {
         assert_eq!((api.heart_rate(true), api.heart_rate(false)), (11, 10));
         api.abi_minor = 1;
         assert_eq!(api.heart_rate(true), -22);
+    }
+
+    extern "C" fn echo(buf: *const u8, len: usize) -> i32 {
+        let r = unsafe { core::slice::from_raw_parts(buf, len) };
+        r.iter().enumerate().map(|(i, &b)| (i as i32 + 1) * b as i32).sum()
+    }
+
+    #[test]
+    fn media_records() {
+        let mut api = table(ABI, ABI_MINOR);
+        api.lv_submit = echo;
+        // [0x16, 1, 0, 0, 4]
+        assert_eq!(api.media_key(MEDIA_NEXT), 0x16 + 2 + 5 * 4);
+        // [0x17, 5, 0, 0, 1, 3, 0, 0x34, 0x12]
+        assert_eq!(api.media_bind(Some(lv::Obj(3)), Some(lv::Obj(0x1234))), 0x17 + 10 + 5 + 6 * 3 + 8 * 0x34 + 9 * 0x12);
+        assert_eq!(api.media_unbind(), 0x17 + 10);
+        api.abi_minor = 1;
+        assert_eq!(api.media_key(MEDIA_PLAY), -22);
     }
 
     #[test]

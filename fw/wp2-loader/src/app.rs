@@ -1,14 +1,14 @@
-use crate::{hr, lv, motor, svc, ui};
+use crate::{hr, lv, media, motor, svc, ui};
 use core::ptr::addr_of_mut;
-use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use wp2_core::gfx;
-use wp2_core::events::{Api, Event, Queue, BUTTON, PAUSE, RESUME};
+use wp2_core::events::{popup_covers, Api, Event, Queue, BUTTON, PAUSE, RESUME};
 use wp2_core::heap::{self, RES};
 use wp2_core::layout::stub_ram;
 use wp2_core::load;
 use wp2_core::stock::{K_THREAD_ABORT, OS_SLEEP, OS_THREAD_CREATE, SYS_CLOCK_TICK_GET};
 
-// bits 0/1: a stock popup is open (set_popup_msgbox / set_close_msgbox, docs/recon.md)
+// bits 0/1: a stock popup is open, ids at +2 / +4 (set_popup_msgbox / set_close_msgbox, docs/recon.md)
 const POPUP_FLAGS: usize = 0x3800_FAF4;
 
 pub const NONE: u8 = 0xFF;
@@ -32,6 +32,8 @@ pub static ON_PAGE: AtomicBool = AtomicBool::new(false);
 // ABI 1.3: the app handles BUTTON itself (own_back); CONSUMED: it popped the last BUTTON
 pub static OWN_BACK: AtomicBool = AtomicBool::new(false);
 pub static CONSUMED: AtomicBool = AtomicBool::new(false);
+// millis() of the app's last next_event call: a busy app with own_back is not hung (events::escape_due)
+pub static POLLED_AT: AtomicU32 = AtomicU32::new(0);
 
 static API: Api = Api {
     abi: 1,
@@ -78,6 +80,7 @@ pub fn launch(slot: u8) -> Result<(), i32> {
     EXITED.store(false, Ordering::Release);
     OWN_BACK.store(false, Ordering::Relaxed);
     CONSUMED.store(false, Ordering::Relaxed);
+    POLLED_AT.store(millis(), Ordering::Relaxed);
     motor::reset();
     QUEUE.clear();
     svc::start(h.abi_minor);
@@ -111,6 +114,7 @@ pub fn stop_app() {
     stock!(K_THREAD_ABORT, fn(*mut u8))(addr_of_mut!(THREAD_BUF) as *mut u8);
     motor::off();
     hr::stop();
+    media::stop();
     svc::stop();
     // LVGL keeps no object, callback or font of the app once its block is gone
     lv::teardown();
@@ -123,10 +127,15 @@ pub fn stop_app() {
 }
 
 fn overlay() -> bool {
-    DEFOCUSED.load(Ordering::Acquire) || unsafe { (POPUP_FLAGS as *const u8).read_volatile() } & 3 != 0
+    let (flags, ids) = unsafe {
+        let p = POPUP_FLAGS as *const u8;
+        (p.read_volatile(), [(p.add(2) as *const u16).read_volatile(), (p.add(4) as *const u16).read_volatile()])
+    };
+    DEFOCUSED.load(Ordering::Acquire) || popup_covers(flags, ids)
 }
 
-// UI tick: a stock popup over a running app pauses it (PAUSE, app's motor off), its close resumes it (RESUME, redraw)
+// UI tick: a stock popup over a running app pauses it (PAUSE, app's motor off), its close resumes it (RESUME, redraw).
+// The AOD overlay is a stock msgbox too, but no pause: the app keeps running and measuring in AOD.
 pub fn pause_tick() {
     let paused = running() && overlay();
     if paused == motor::PAUSED.swap(paused, Ordering::AcqRel) {
@@ -192,7 +201,14 @@ extern "C" fn present() {
 extern "C" fn next_event(ev: *mut Event, timeout_ms: u32) -> bool {
     let start = millis();
     loop {
-        hr::emit();
+        POLLED_AT.store(millis(), Ordering::Relaxed);
+        // straight to the app, not through QUEUE: the UI thread is its only producer
+        if let Some(e) = hr::due() {
+            if !ev.is_null() {
+                unsafe { ev.write(e) };
+            }
+            return true;
+        }
         if let Some(e) = QUEUE.pop() {
             if e.kind == BUTTON {
                 CONSUMED.store(true, Ordering::Release);

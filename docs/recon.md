@@ -441,6 +441,7 @@ Ghidra and capstone on the launcher's message handler (`0x1005DE00…0x1005E290`
 | Item | Value | Confidence |
 |---|---|---|
 | Early-suspend | the launcher sends message `0x82` to the top view (`0x101D72CE(top, 0x82, 0)`, top from `0x101894A8`), then reads ux2sys property `0x6E`; non-zero → "AOD enter" `0x100677C0`: opens overlay `0x113` (`0x100D5E34`) over the current view. No view is deleted | high (static) |
+| AOD overlay = msgbox | AOD enter calls `0x101B9EEE(0x113, 0)` → `0x100D5E34` = `msgbox_cache_popup`, the same path as the charge popup (mid 262): the AOD overlay is stock msgbox `0x113` and sets the popup flags `0x3800FAF4` (bit 0 → id at `+2`, bit 1 → id at `+4`, `set_popup_msgbox` `0x100D6EB0`, base `0x3800FAC0`). AOD exit is `0x101B9EF6(0x113, 0)` → `0x100D6460` (close msgbox). A loader that pauses on any popup flag pauses the app on every AOD | high (static); calling AOD enter in the emulator was not reached (the ui thread takes no lock while dark) |
 | Late-resume | "AOD exit" `0x10067828` closes overlay `0x113`; if the view stack is empty (`0x1018949C` = 0) it resets to the clock (`0x1005DAAC`), else it sends `0x83` to the top view. The stack `[16, 18, 240]` stays | high (static) |
 | Suspend / resume | only set the launcher's state bits (`+0x1E` bits 0–1) and log | high (static) |
 | Wake key | the press that wakes the panel is dropped by the stock (`drop key workup`), the app gets no `BUTTON` | high (emulator, S1) |

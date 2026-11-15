@@ -46,9 +46,15 @@ pub enum Class {
     /// [`Batch::events`]. [`Batch::value`] glides to a page. Loader of 2026-11-14; an older one answers -22.
     /// Use [`crate::stock::pager`].
     Pager = 8,
-    /// The next page of its [`Class::Pager`] parent, as large as the pager. Content taller than it scrolls inside the
-    /// page first, and the pager pages at its end, by drag and by crown alike. Goes with its pager (no `del`).
+    /// The next page of its [`Class::Pager`] parent (below) or [`Class::PagerH`] parent (to the right), as large as
+    /// the pager. Content taller than it scrolls inside the page first; in a vertical pager it pages at its end, by
+    /// drag and by crown alike. Goes with its pager (no `del`).
     Page = 9,
+    /// The stock `lv_tileview` as a horizontal pager, like the stock workout screen: pages side by side, one per
+    /// swipe, no crown. The page event and [`Batch::value`] as for [`Class::Pager`]. While one lives the right
+    /// back swipe pages instead of giving BUTTON; the crown press still gives BUTTON. Loader of 2026-11-16; an older
+    /// one answers -22. Use [`crate::stock::hpager`].
+    PagerH = 10,
 }
 
 /// `lv_align_t`.

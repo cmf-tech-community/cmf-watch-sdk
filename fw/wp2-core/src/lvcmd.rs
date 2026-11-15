@@ -40,8 +40,13 @@ pub enum Class {
     /// `lv_tileview`: a vertical pager of full-screen pages that snaps to one page per swipe or crown step
     /// (loader of 2026-11-14; an older loader answers `-22`). Its children are [`Class::Page`]s only.
     Pager = 8,
-    /// A tileview tile, the next row of its parent [`Class::Pager`]; it scrolls its own content vertically.
+    /// A tileview tile: the next row of its parent [`Class::Pager`] or the next column of its [`Class::PagerH`]; it
+    /// scrolls its own content vertically.
     Page = 9,
+    /// `lv_tileview` as a horizontal pager (the stock workout screen `sport1_view`): pages side by side, one per
+    /// swipe, no crown. While one lives the loader keeps the right back swipe from the app (docs/abi-1.4.md,
+    /// "Horizontal pager"). Loader of 2026-11-16; an older loader answers `-22`. Its children are pages only.
+    PagerH = 10,
 }
 
 impl Class {
@@ -57,6 +62,7 @@ impl Class {
             7 => Class::ScrollBar,
             8 => Class::Pager,
             9 => Class::Page,
+            10 => Class::PagerH,
             _ => return None,
         })
     }
@@ -136,6 +142,11 @@ impl Table {
 
     fn live(&self) -> usize {
         self.class[1..].iter().filter(|&&c| c != FREE).count()
+    }
+
+    /// A live object of class `c`.
+    pub fn has(&self, c: Class) -> bool {
+        self.class[1..].contains(&(c as u8))
     }
 }
 
@@ -322,7 +333,7 @@ fn check(t: &Table, fonts: &mut u8, r: &Rec) -> Result<(), Error> {
             fresh(t, h)?;
             // a pager holds pages only (each is the next row), and a page lives in a pager
             let p = cls(t, parent)?;
-            if p == Class::ScrollBar || (p == Class::Pager) != (class == Class::Page) {
+            if p == Class::ScrollBar || matches!(p, Class::Pager | Class::PagerH) != (class == Class::Page) {
                 return Err(Error::BadClass);
             }
         }
@@ -365,7 +376,7 @@ fn check(t: &Table, fonts: &mut u8, r: &Rec) -> Result<(), Error> {
             Class::Bar | Class::Slider => {}
             Class::Roller => bad(u16::try_from(v).is_err())?,
             // the page to show; past the last one it shows the last
-            Class::Pager => bad(!(0..=MAX_OBJS as i32).contains(&v))?,
+            Class::Pager | Class::PagerH => bad(!(0..=MAX_OBJS as i32).contains(&v))?,
             _ => return Err(Error::BadClass),
         },
         Rec::Range { h, min, max } => {
@@ -531,6 +542,64 @@ pub fn sensor(buf: &[u8]) -> Option<(u8, bool)> {
         [0x13, 2, 0, 0, sensor, on @ (0 | 1)] => Some((sensor, on == 1)),
         _ => None,
     }
+}
+
+/// LV_DIR_LEFT / LV_DIR_RIGHT.
+pub const DIR_LEFT: u8 = 1;
+pub const DIR_RIGHT: u8 = 2;
+
+/// Scroll directions of the tile added as column `col` of a horizontal pager, as the stock `sport1_view` sets its
+/// three (2, 3, 1): the first goes right, the newest (last) left; the one before the newest gains RIGHT
+/// (`prev`, None for the first).
+pub fn hpage_dirs(col: u32) -> (u8, Option<u8>) {
+    match col {
+        0 => (DIR_RIGHT, None),
+        1 => (DIR_LEFT, Some(DIR_RIGHT)),
+        _ => (DIR_LEFT, Some(DIR_LEFT | DIR_RIGHT)),
+    }
+}
+
+/// MEDIA_KEY commands (ux2sys 0x4E, as the stock music view and workout screen send them).
+pub const MEDIA_PLAY: u8 = 1;
+pub const MEDIA_PAUSE: u8 = 2;
+pub const MEDIA_PREV: u8 = 3;
+pub const MEDIA_NEXT: u8 = 4;
+
+/// MEDIA_KEY record (op 0x16, handle 0, payload `[cmd]`, cmd 1 play, 2 pause, 3 previous, 4 next), alone in a
+/// batch (docs/abi-1.4.md, "Music"). On an older loader op 0x16 is `Malformed` (-22).
+pub fn media_key(buf: &[u8]) -> Option<u8> {
+    match *buf {
+        [0x16, 1, 0, 0, cmd @ MEDIA_PLAY..=MEDIA_NEXT] => Some(cmd),
+        _ => None,
+    }
+}
+
+/// MEDIA_BIND record (op 0x17, handle 0, payload `[on, title u16, artist u16]`), alone in a batch: on = 1 the
+/// loader writes the phone's track title and artist into those labels (handle 0 = none) and sends MEDIA events;
+/// on = 0 stops it. On an older loader op 0x17 is `Malformed` (-22).
+pub fn media_bind(buf: &[u8]) -> Option<(bool, u16, u16)> {
+    match *buf {
+        [0x17, 5, 0, 0, on @ (0 | 1), t0, t1, a0, a1] => Some((on == 1, u16::from_le_bytes([t0, t1]), u16::from_le_bytes([a0, a1]))),
+        _ => None,
+    }
+}
+
+/// A MEDIA_BIND label: 0 (none) or a live label.
+pub fn media_label_ok(t: &Table, h: u16) -> bool {
+    h == 0 || t.class(h) == Some(Class::Label)
+}
+
+/// ux2sys 0x4F, as the stock reads it: title in `[0..0x40]`, artist in `[0x41..0x81]`, each up to its first NUL
+/// (the stock writes the NUL at 0x40 and 0x81 itself). Invalid UTF-8 is cut at the last valid char.
+pub fn media_info(buf: &[u8; 0x82]) -> (&[u8], &[u8]) {
+    fn field(f: &[u8]) -> &[u8] {
+        let f = &f[..f.iter().position(|&c| c == 0).unwrap_or(f.len())];
+        match core::str::from_utf8(f) {
+            Ok(_) => f,
+            Err(e) => &f[..e.valid_up_to()],
+        }
+    }
+    (field(&buf[..0x40]), field(&buf[0x41..0x81]))
 }
 
 #[cfg(test)]
@@ -864,7 +933,7 @@ mod tests {
         assert_eq!(v(&[value(1, -1)]), Err(Error::BadValue));
         assert_eq!(v(&[value(1, 193)]), Err(Error::BadValue));
         assert_eq!(v(&[value(2, 0)]), Err(Error::BadClass));
-        assert_eq!(v(&[r(1, 4, &[10, 0, 0])]), Err(Error::BadValue), "no class 10");
+        assert_eq!(v(&[r(1, 4, &[11, 0, 0])]), Err(Error::BadValue), "no class 11");
     }
 
     #[test]
@@ -895,5 +964,45 @@ mod tests {
         assert_eq!(sensor(cmf_wp2_app::HEART_ON), Some((crate::heart::SENSOR_HEART, true)));
         assert_eq!(sensor(cmf_wp2_app::HEART_OFF), Some((crate::heart::SENSOR_HEART, false)));
         assert_eq!(validate(cmf_wp2_app::HEART_ON, &Table::new(), 0), Err(Error::Malformed));
+    }
+
+    #[test]
+    fn hpager() {
+        let mut t = Table::new();
+        assert_eq!(check(&[create(1, 10, 0), create(2, 9, 1), create(3, 9, 1), value(1, 2)]), Ok(()));
+        // pages only, in a pager only
+        assert_eq!(check(&[create(1, 10, 0), create(2, 0, 1)]), Err(Error::BadClass));
+        assert_eq!(check(&[create(1, 0, 0), create(2, 9, 1)]), Err(Error::BadClass));
+        assert!(!t.has(Class::PagerH));
+        for r in records(&create(1, 10, 0)) {
+            apply(&mut t, &r.unwrap());
+        }
+        assert!(t.has(Class::PagerH) && !t.has(Class::Pager));
+        // the stock's three tiles: 2, 3, 1
+        assert_eq!([hpage_dirs(0), hpage_dirs(1), hpage_dirs(2)], [(2, None), (1, Some(2)), (1, Some(3))]);
+    }
+
+    #[test]
+    fn media_records() {
+        assert_eq!(media_key(&[0x16, 1, 0, 0, 2]), Some(MEDIA_PAUSE));
+        assert_eq!(media_key(&[0x16, 1, 0, 0, 0]), None);
+        assert_eq!(media_key(&[0x16, 1, 0, 0, 5]), None); // no volume
+        assert_eq!(media_bind(&[0x17, 5, 0, 0, 1, 3, 0, 4, 0]), Some((true, 3, 4)));
+        assert_eq!(media_bind(&[0x17, 5, 0, 0, 2, 3, 0, 4, 0]), None);
+        // on an older loader both are Malformed
+        assert_eq!(check(&[vec![0x16, 1, 0, 0, 1]]), Err(Error::Malformed));
+        assert_eq!(check(&[vec![0x17, 5, 0, 0, 1, 3, 0, 4, 0]]), Err(Error::Malformed));
+        let mut t = Table::new();
+        for r in records(&create(1, 1, 0)) {
+            apply(&mut t, &r.unwrap());
+        }
+        assert!(media_label_ok(&t, 0) && media_label_ok(&t, 1) && !media_label_ok(&t, 2));
+        let mut b = [0u8; 0x82];
+        b[..4].copy_from_slice(b"Song");
+        b[0x41..0x44].copy_from_slice(b"Art");
+        assert_eq!(media_info(&b), (&b"Song"[..], &b"Art"[..]));
+        b[..0x40].fill(b'x');
+        b[0x3F] = 0xD0; // half a two-byte char at the end
+        assert_eq!(media_info(&b).0.len(), 0x3F);
     }
 }

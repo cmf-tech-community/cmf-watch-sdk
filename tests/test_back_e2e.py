@@ -106,7 +106,8 @@ class BackTest(unittest.TestCase):
 
 @skipUnless(harness.E2E, "set WP2_E2E=1 (needs the emulator, netsimd and gdb)")
 class OwnBackTest(unittest.TestCase):
-    """ABI 1.3 own_back (docs/abi-1.3.md): back-owner reads every BUTTON and is not stopped; hung, it still is."""
+    """ABI 1.3 own_back (docs/abi-1.3.md): back-owner reads every BUTTON and is not stopped; hung, it still is (after
+    5 s since the loader of 2026-11-16)."""
     ELF = paths.ROOT / "sdk/target/thumbv7em-none-eabi/release/back-owner"
 
     def presses(self, emu):
@@ -134,11 +135,13 @@ class OwnBackTest(unittest.TestCase):
             emu.send("r -80", pause=0.5)  # crown: the app stops reading events
             start = emu.clock()
             emu.send("c 1", "c 0", pause=0)
-            while self.running(emu) and emu.clock() - start < 4:
+            while self.running(emu) and emu.clock() - start < 8:
                 emu.sleep(0.125)
             print(f"\nhung owner stopped after {emu.clock() - start:.3f} s")
             self.assertFalse(self.running(emu))
-            self.assertLessEqual(emu.clock() - start, 3)
+            # an owner gets HANG_MS (5 s) without reading or polling: a busy one is not hung (docs/abi-1.4.md)
+            self.assertGreaterEqual(emu.clock() - start, 4.5)
+            self.assertLessEqual(emu.clock() - start, 7)
 
 
 @skipUnless(harness.E2E, "set WP2_E2E=1 (needs the emulator, netsimd and gdb)")

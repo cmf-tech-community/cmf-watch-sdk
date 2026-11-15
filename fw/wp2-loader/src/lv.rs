@@ -34,6 +34,8 @@ const LAYOUT_CHANGED: u32 = 43;
 const STATE_CHECKED: u32 = 0x01;
 // LV_DIR_TOP | LV_DIR_BOTTOM: a page scrolls the pager vertically only
 const DIR_VER: u32 = 0x0C;
+// lv_tileview_tile_t: lv_obj_t (0x2C B), then u8 dir (tile constructor 0x10138078)
+const TILE_DIR: usize = 0x2C;
 // lv_obj_t coords: i32 x1 y1 x2 y2 at +0x14 (docs/recon-lvgl.md)
 const Y1: usize = 0x18;
 const Y2: usize = 0x20;
@@ -95,6 +97,21 @@ pub fn root() -> Obj {
     st().objs[0]
 }
 
+/// UI thread: a horizontal pager lives; the right back swipe stays with it (main.rs key).
+pub fn hpager() -> bool {
+    !root().is_null() && st().table.has(Class::PagerH)
+}
+
+/// UI thread: the object of a live label, else null.
+pub fn label(h: u16) -> Obj {
+    if h != 0 && st().table.class(h) == Some(Class::Label) { st().objs[h as usize] } else { null_mut() }
+}
+
+/// App thread, inside submit (the table holds still): `h` is 0 or a live label.
+fn label_ok(h: u16) -> bool {
+    lvcmd::media_label_ok(&st().table, h)
+}
+
 /// App thread (Api.lv_submit): waits until the UI tick ran the batch.
 pub extern "C" fn submit(buf: *const u8, len: usize) -> i32 {
     let ram = stub_ram();
@@ -112,6 +129,16 @@ pub extern "C" fn submit(buf: *const u8, len: usize) -> i32 {
     }
     if let Some(rec) = lvcmd::widget(unsafe { core::slice::from_raw_parts(buf, len) }) {
         return crate::svc::save_widget(rec);
+    }
+    if let Some(cmd) = lvcmd::media_key(unsafe { core::slice::from_raw_parts(buf, len) }) {
+        return crate::media::key(cmd);
+    }
+    if let Some((on, title, artist)) = lvcmd::media_bind(unsafe { core::slice::from_raw_parts(buf, len) }) {
+        if root().is_null() || !label_ok(title) || !label_ok(artist) {
+            return -22;
+        }
+        crate::media::bind(on, title, artist);
+        return 0;
     }
     REQ_PTR.store(p as u32, Ordering::Relaxed);
     REQ_LEN.store(len as u32, Ordering::Relaxed);
@@ -203,11 +230,21 @@ fn exec(r: &Rec) -> Result<(), i32> {
                 Class::Bar => LV_BAR_CREATE,
                 Class::Slider => LV_SLIDER_CREATE,
                 Class::Roller => LV_ROLLER_CREATE,
-                Class::Pager => LV_TILEVIEW_CREATE,
+                Class::Pager | Class::PagerH => LV_TILEVIEW_CREATE,
                 Class::Page => {
-                    // the next row of its pager (validated: the parent is a pager)
-                    let row = stock!(LV_OBJ_GET_CHILD_CNT, fn(Obj) -> u32)(o(parent));
-                    let obj = stock!(LV_TILEVIEW_ADD_TILE, fn(Obj, u32, u32, u32) -> Obj)(o(parent), 0, row, DIR_VER);
+                    // the next row of its pager, or the next column of a horizontal one (validated: the parent is one)
+                    let n = stock!(LV_OBJ_GET_CHILD_CNT, fn(Obj) -> u32)(o(parent));
+                    let add = stock!(LV_TILEVIEW_ADD_TILE, fn(Obj, u32, u32, u32) -> Obj);
+                    let obj = if s.table.class(parent) == Some(Class::PagerH) {
+                        let (dir, prev) = lvcmd::hpage_dirs(n);
+                        if let Some(d) = prev {
+                            // the stock's middle tile goes both ways: the one before the newest gains RIGHT
+                            unsafe { (child(o(parent), n - 1) as *mut u8).add(TILE_DIR).write(d) };
+                        }
+                        add(o(parent), n, 0, dir.into())
+                    } else {
+                        add(o(parent), 0, n, DIR_VER)
+                    };
                     let h = h as usize;
                     (s.objs[h], s.events[h], s.options[h]) = (obj, 0, 0);
                     return Ok(());
@@ -217,6 +254,10 @@ fn exec(r: &Rec) -> Result<(), i32> {
             let obj = stock!(create, fn(Obj) -> Obj)(o(parent));
             let h = h as usize;
             (s.objs[h], s.events[h], s.options[h]) = (obj, 0, 0);
+            if class == Class::PagerH {
+                // the page it settles on goes to the app; no crown (the stock workout screen pages by swipe only)
+                add_cb(obj, on_pager, VALUE_CHANGED, h);
+            }
             if class == Class::Pager {
                 // the page it settles on goes to the app; the crown steps pages (on_event), as a roller takes the knob
                 add_cb(obj, on_pager, VALUE_CHANGED, h);
@@ -263,7 +304,7 @@ fn exec(r: &Rec) -> Result<(), i32> {
         Rec::Value { h, v, anim } => match s.table.class(h) {
             // validated: arc values fit i16, roller indices u16
             Some(Class::Arc) => stock!(LV_ARC_SET_VALUE, fn(Obj, i16))(o(h), v as i16),
-            Some(Class::Pager) => go_page(h, v as u32, anim),
+            Some(Class::Pager | Class::PagerH) => go_page(h, v as u32, anim),
             Some(Class::Roller) => {
                 let n = s.options[h as usize];
                 if n != 0 {
@@ -447,7 +488,7 @@ extern "C" fn on_event(e: *mut c_void) {
         }
         return;
     }
-    if code == VALUE_CHANGED && st().table.class(h) == Some(Class::Pager) {
+    if code == VALUE_CHANGED && matches!(st().table.class(h), Some(Class::Pager | Class::PagerH)) {
         return; // on_pager reports it, with the page
     }
     let mut ev = Event { kind: LV, x: h as i16, y: code as i16, ..Event::default() };
@@ -479,7 +520,8 @@ fn go_page(h: u16, i: u32, anim: bool) {
     }
     let i = i.min(n - 1);
     st().options[h as usize] = i as u8;
-    stock!(LV_OBJ_SET_TILE_ID, fn(Obj, u32, u32, u32))(obj, 0, i, anim.into());
+    let (col, row) = if st().table.class(h) == Some(Class::PagerH) { (i, 0) } else { (0, i) };
+    stock!(LV_OBJ_SET_TILE_ID, fn(Obj, u32, u32, u32))(obj, col, row, anim.into());
 }
 
 // The crown on a pager, like a drag: the page's own content scrolls first (by the stock crown step), and at its end

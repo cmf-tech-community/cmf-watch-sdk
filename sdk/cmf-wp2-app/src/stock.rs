@@ -303,4 +303,48 @@ impl<const N: usize> Pager<N> {
     }
 }
 
+/// A horizontal pager over the whole screen ([`Class::PagerH`]) with `n` pages (at most `N`; the handles past `n`
+/// are `ROOT`), as the stock workout screen: swipe left/right, one page per swipe, the crown stays with the app.
+/// While it lives the right back swipe pages and gives no BUTTON: leave with the crown press. Build the pages'
+/// content into `pages`. `del(obj)` removes it all.
+#[derive(Clone, Copy)]
+pub struct HPager<const N: usize> {
+    pub obj: Obj,
+    pub pages: [Obj; N],
+    /// The page it last settled on.
+    pub at: usize,
+    pub n: usize,
+}
+
+pub fn hpager<const N: usize>(b: &mut Batch, n: usize) -> Result<HPager<N>, LvError> {
+    let n = n.min(N);
+    let obj = b.create(Class::PagerH, ROOT)?;
+    b.size(obj, SCREEN, SCREEN)?;
+    let mut pages = [ROOT; N];
+    for p in pages.iter_mut().take(n) {
+        *p = b.create(Class::Page, obj)?;
+    }
+    Ok(HPager { obj, pages, at: 0, n })
+}
+
+impl<const N: usize> HPager<N> {
+    /// For every event: the page it settled on, if this is its page event.
+    pub fn event(&mut self, e: &crate::Event) -> Option<usize> {
+        let i = (e.kind == crate::LV && e.x as u16 == self.obj.0 && e.y == PAGE_CHANGED).then_some(e.delta as usize)?;
+        self.at = i;
+        Some(i)
+    }
+
+    /// Glides to page `i`; the page event follows when it settles.
+    pub fn go(&self, b: &mut Batch, i: usize) -> Result<(), LvError> {
+        b.value(self.obj, i as i32, true)
+    }
+
+    /// Shows page `i` at once.
+    pub fn jump(&mut self, b: &mut Batch, i: usize) -> Result<(), LvError> {
+        self.at = i.min(self.n.saturating_sub(1));
+        b.value(self.obj, i as i32, false)
+    }
+}
+
 // ponytail: validated through lv-demo's host tests (they have wp2-core's validator), not here

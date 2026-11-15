@@ -17,6 +17,9 @@ ELF = paths.ROOT / "sdk/target/thumbv7em-none-eabi/release/hr-probe"
 WEAR, OWNER, BPM = 0x3804B30C, 0x3804B30F, 0x3804B310  # wp2_core::stock HR_*
 REQUESTS = 0x38048D16 + 5  # stock start/stop request count of the HEARTRATE algorithm (docs/recon.md)
 RESULT, EVENTS, DELTA, X = range(4)  # PROBE, hr-probe main.rs
+POPUP = 0x3800FAF4  # u8 flags, u16 ids at +2 / +4 (docs/recon.md, set_popup_msgbox)
+AOD_MSGBOX = 0x113  # msgbox_cache_popup(0x113, 0) from the launcher's AOD enter 0x100677C0
+HR_CHECKS = 0x3801A5D4  # check_hb_is_exceptional: at 5 the stock drops every HR request
 
 
 @skipUnless(harness.E2E, "set WP2_E2E=1 (needs the emulator, netsimd, gdb and llvm-nm)")
@@ -120,6 +123,74 @@ class HeartRateTest(unittest.TestCase):
             self.assert_on(emu, True, "still the one start after the wake")
             self.assertEqual(self.probe(emu)[DELTA], 71, "no restart on wake")
             self.assertTrue(self.running(emu))
+
+
+    def aod(self, emu, on, mid=AOD_MSGBOX):
+        """The state AOD enter leaves: the AOD msgbox in popup slot 0. The emulator cannot run AOD itself
+        (docs/recon.md, "Screen-off and the app view"), so the test writes it."""
+        emu.poke(POPUP, struct.pack("<BxH", 1 if on else 0, mid if on else 0))
+
+    def test_aod_overlay_no_pause(self):
+        """The AOD overlay is a stock msgbox: it must not pause the app (the old rule paused on any popup flag)."""
+        with harness.installed(["loader", "hr-probe"], name="hr-aod") as (emu, port):
+            dismiss_popup(emu)
+            harness.ready(emu)
+            harness.open_apps(emu)
+            tap_row(emu, 0)
+            emu.sleep(2)
+            self.assert_on(emu, True)
+            self.aod(emu, True)
+            emu.sleep(2)
+            self.assert_on(emu, True, "AOD msgbox paused the app")
+            events = self.probe(emu)[EVENTS]
+            emu.sleep(3)
+            self.assertGreaterEqual(self.probe(emu)[EVENTS] - events, 2, "HEART stopped under AOD")
+            self.aod(emu, True, mid=246)  # any other msgbox (the call box) still pauses
+            emu.sleep(2)
+            self.assert_on(emu, False, "a real popup no longer pauses")
+            self.aod(emu, False)
+            emu.sleep(2)
+            self.assert_on(emu, True, "no resume")
+            self.assertTrue(self.running(emu))
+
+    def test_long_aod(self):
+        """Over 5 min dark in AOD: no pause, HEART keeps coming, the stock 1-min HR watchdog does not close the
+        measurement and "return to watch face" does not close the app."""
+        from tests.test_back_e2e import ScreenOffTest, RETURN_CB
+        with harness.installed(["loader", "hr-probe"], name="hr-long-aod") as (emu, port):
+            ScreenOffTest().open(emu, port)
+            emu.sleep(2)
+            self.assert_on(emu, True)
+            mark = len(emu.uart())
+            seen = []
+
+            def dark():
+                self.aod(emu, True)
+                emu.poke(RETURN_CB + 0x18, struct.pack("<I", 1000))  # return to the face after 1 s dark
+                start = emu.clock()
+                while emu.clock() - start < 360:
+                    emu.poke(BPM, bytes([60 + len(seen) % 20]))
+                    before = self.probe(emu)[EVENTS]
+                    emu.sleep(30)
+                    p = self.probe(emu)
+                    seen.append((self.owner(emu), emu.peek(REQUESTS, 1)[0], p[EVENTS] - before, p[DELTA],
+                                 harness.u32(emu, HR_CHECKS)))
+                self.aod(emu, False)
+            ScreenOffTest.blank_and_wake(emu, port, during=dark)
+            print("\nAOD samples (owner, requests, HEART per 30 s, delta, watchdog checks):", seen)
+            self.assertGreaterEqual(len(seen), 12)
+            for i, (owner, requests, events, delta, checks) in enumerate(seen):
+                self.assertEqual((owner, requests), (1, 1), f"measurement off at {i}")
+                self.assertGreaterEqual(events, 20, f"HEART stalled at {i}")
+                self.assertEqual(delta, 60 + i % 20, f"stale reading at {i}")
+                self.assertLess(checks, 5, "HR watchdog closed it")
+            uart = emu.uart()[mark:]
+            self.assertNotIn("return clock", uart)
+            self.assertNotIn("jxclose", uart)
+            emu.sleep(1)
+            self.assertTrue(self.running(emu))
+            self.assert_on(emu, True, "one start for the whole hold")
+            self.assertEqual(harness.focused(emu), 240)
 
 
 if __name__ == "__main__":

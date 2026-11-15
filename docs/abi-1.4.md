@@ -112,7 +112,16 @@ SDK: `Api::heart_rate(&self, on: bool) -> i32`, event kind `HEART` = 9.
 - The loader stops the measurement on exit, crash (`exit(-1)` from the panic handler), force stop, view delete,
   and `PAUSE`; it starts it again on `RESUME`, with the reading cleared. It keeps measuring while the panel is dark
   (AOD included): the readings keep coming, so a workout has heart rate through its rests; the watch stays out of deep
-  sleep meanwhile. A stop while
+  sleep meanwhile. AOD sends no `PAUSE` since the loader of 2026-11-16: the launcher's AOD enter (`0x100677C0`)
+  opens the AOD overlay as stock msgbox `0x113` (`msgbox_cache_popup`, the function the charge popup goes through),
+  which sets the popup flags `0x3800FAF4`; the loader of 2026-11-14 paused on any popup flag, so every dark panel
+  with AOD on paused the app, stopped the measurement and restarted it on wake (the hardware symptom: `PAUSE` and
+  `RESUME` a few times a minute, no reading). Now msgbox `0x113` does not count (`events::popup_covers`), nor does
+  a `DEFOCUS` after the view's own early-suspend `0x82`; a call or notification box over AOD still pauses. HEART
+  events go from `next_event` straight to the app (`hr::due`), not through the event queue, whose only producer is
+  the UI thread. Emulator proof: `tests/test_hr_e2e.py` `test_aod_overlay_no_pause` (the AOD msgbox state written by
+  the test: the emulator cannot run AOD) and `test_long_aod` (6 min dark: no pause, one start, HEART every second,
+  the HR watchdog count below 5, no return to the face). A stop while
   the app runs queues one HEART with `delta` 0: no reading while it is off. A new launch starts with it off.
 - The panel keeps its own auto-sleep: the loader does not take the heart view's 25 s hold (`docs/recon.md`, "Heart
   view: screen"). A reading needs the panel lit for a few seconds; an app that wants one holds the screen itself
@@ -166,6 +175,53 @@ SDK: `stock::pager` (`docs/app-guide.md`, "Pages"). Emulator proof: `tests/test_
 - The tileview scrolls vertically only, so the back swipe (`0x71`, a right swipe) reaches the loader as before.
 - `ABI_MINOR` stays 3 (an OTA would be needed otherwise). An older loader answers `-22` to class 8 and 9: install the
   loader first. The golden fixture is unchanged; `lvcmd::tests::pager_holds_pages` pins the rules.
+
+## Horizontal pager (loader of 2026-11-16, no ABI bump)
+
+The stock workout screen (`sport1_view` `0x64`, built in `0x10079148`) is an `lv_tileview` with three tiles side by
+side, `add_tile(tv, 0..2, 0, dir)` with dir 2, 3, 1. SDK: `stock::hpager` (`docs/app-guide.md`, "Horizontal
+pager"). Emulator proof: `tests/test_pager_e2e.py` `test_hpager` (ui-gallery `!hpager`).
+
+- `CREATE` class **10 PagerH**: `lv_tileview_create(parent)` and the loader's `VALUE_CHANGED` callback, no crown
+  filter (the crown stays with the app: CROWN events as on the root). Its children are class 9 pages only; a page in
+  a PagerH is `lv_tileview_add_tile(pager, col, 0, dir)` with `col` = the child count and the stock directions:
+  the first `LV_DIR_RIGHT`, the newest `LV_DIR_LEFT`, the one before it gains `LV_DIR_RIGHT` (byte `tile + 0x2C`,
+  set by the tile constructor `0x10138078`; the constructor sets the tileview's scroll direction from tile (0, 0)
+  only), so three pages get 2, 3, 1 as in the stock (`lvcmd::hpage_dirs`).
+- `VALUE`: `lv_obj_set_tile_id(pager, v, 0, anim)`. The page event as for the vertical pager.
+- Back swipe: while any PagerH lives the loader marks key `0x71` (the right swipe) handled and queues no `BUTTON`,
+  as the stock launcher skips back for the sport views 100..105 (`docs/recon.md`). The crown press stays `BUTTON`
+  and keeps the escape. On the first page the right swipe does nothing.
+- An older loader answers `-22` to class 10. `lvcmd::tests::hpager` pins the rules.
+
+## Music (loader of 2026-11-16, no ABI bump)
+
+The phone's music, as the stock music view and workout screen control it (ux2sys, getter `0x100E082C(prop, out)`,
+setter `0x100E07B8`): `0x31` phone link (u32), `0x4C` media available (u32), `0x4D` playing (u32), `0x4E` command
+(set, u32: 1 play, 2 pause, 3 previous, 4 next; the stock sends it only when `0x31` and `0x4C` are non-zero),
+`0x4F` title `[0..0x40]` and artist `[0x41..0x81]` (NUL-terminated). Volume (`0x50`) is not offered.
+
+- **MEDIA_KEY** record, alone in a batch: `[0x16, 1, 0, 0, cmd]`, cmd 1..=4. The UI tick checks the link and media
+  and sets `0x4E`; the app thread waits for it as for an LVGL batch (with the panel dark it returns once it is lit).
+  `0`, `-19` without a phone link or media, `-22` for another cmd and on an older loader.
+- **MEDIA_BIND** record, alone in a batch: `[0x17, 5, 0, 0, on, title u16, artist u16]`. `on = 1`: from the next UI
+  tick, once a second while the app runs in the foreground, the loader reads `0x4D`, `0x31`/`0x4C` and `0x4F`; it
+  queues `Event { kind: MEDIA (10), x: playing, y: available }` once at the bind and on every change, and writes
+  title and artist into the two labels when the text changed (handle 0 = not shown; a label deleted since is
+  skipped). `on = 0` stops it; exit and force stop do too. `-22` for a handle that is not a live label, before
+  the app's first LVGL batch, and on an older loader.
+- Wire format and the label text cut: `lvcmd::media_key`, `media_bind`, `media_info` and their tests. SDK:
+  `Api::media_key`, `Api::media_bind`, `Api::media_unbind`, `MEDIA`, `MEDIA_PLAY`…`MEDIA_NEXT`.
+- Emulator: no phone media there, so `test_hpager` checks the bind (one `MEDIA`, 0/0) and `-19`; the label writes
+  and a real command need the phone (not proven).
+
+## Escape with own_back (loader of 2026-11-16, no ABI bump)
+
+ABI 1.3 stopped an app that owns back when a `BUTTON` stayed unread for 1000 ms. A live app that is busy longer (a
+view rebuild after the first swipe, a 4 KB save) was closed by the next swipe. Now (`events::escape_due`):
+an app that owns back is stopped only when it has neither read the `BUTTON` nor called `next_event` for
+**5000 ms** (`HANG_MS`); other apps keep the 1000 ms. The escape is armed only when the `BUTTON` was queued (a full
+queue drops it; before, that armed a timer for an event the app never got).
 
 ## Stub version (stub 2, no ABI bump)
 

@@ -136,12 +136,30 @@ fn owned_back_unread_is_still_killed() {
     let s = sim("wait 50\nb");
     s.lock().own_back(true);
     let mut st = s.lock();
-    st.us = 100_000; // the press at 100 ms, never popped
+    st.us = 100_000; // the press at 100 ms, never popped, no next_event either: hung
     st.pump();
-    st.us = 1_100_000;
+    st.us = 5_099_000;
+    st.pump();
+    assert_eq!(st.end, None, "an owner gets HANG_MS");
+    st.us = 5_100_000;
     st.pump();
     drop(st);
     assert_eq!(s.lock().end, Some(End::Killed));
+}
+
+#[test]
+fn owned_back_busy_owner_is_not_killed() {
+    // busy 2 s after the press (no next_event), then reads it: alive, as a view rebuild or a save
+    let s = sim("wait 50\nb");
+    s.lock().own_back(true);
+    let mut st = s.lock();
+    st.us = 100_000;
+    st.pump();
+    st.us = 2_100_000;
+    st.pump();
+    drop(st);
+    assert_eq!(s.next_event(0).map(|e| e.kind), Some(BUTTON));
+    assert_eq!(s.lock().end, None);
 }
 
 #[test]

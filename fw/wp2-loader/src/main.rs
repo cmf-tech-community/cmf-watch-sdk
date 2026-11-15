@@ -13,6 +13,8 @@ mod app;
 mod hr;
 #[cfg(target_os = "none")]
 mod lv;
+#[cfg(target_os = "none")]
+mod media;
 mod menu;
 #[cfg(target_os = "none")]
 mod motor;
@@ -29,6 +31,7 @@ mod view {
     use core::sync::atomic::Ordering;
     use wp2_core::events::{escape_due, map_key, Event, BUTTON, CROWN, TOUCH_DOWN, TOUCH_UP};
     use wp2_core::pkg::{F_PAGE, F_WIDGET};
+    use wp2_core::stock::KEY_BACK;
 
     const PRELOAD: u32 = 2;
     const LAYOUT: u32 = 3;
@@ -105,8 +108,9 @@ mod view {
                 0
             }
             FOCUS | DEFOCUS => {
-                app::DEFOCUSED.store(msg == DEFOCUS, Ordering::Release);
                 let m = st();
+                // a DEFOCUS after our SUSPEND is the AOD overlay, not a view over the app: no pause
+                app::DEFOCUSED.store(msg == DEFOCUS && !m.asleep, Ordering::Release);
                 // an app that ended on its page starts again when the page comes back
                 if let (FOCUS, Some(slot), false) = (msg, m.page, app::running()) {
                     launch_page(m, slot);
@@ -157,7 +161,8 @@ mod view {
     // data: u32 key code, byte +4 = handled. In the menu the crown scrolls through LVGL, the button (to the
     // clock) and the back swipe (view stack pop to the app list) stay with the stock. In an app both are BUTTON.
     fn key(data: *mut c_void) {
-        let Some(e) = map_key(unsafe { *(data as *const u32) }) else { return };
+        let code = unsafe { *(data as *const u32) };
+        let Some(e) = map_key(code) else { return };
         let m = st();
         // on a page the keys stay with the stock, as on any card: the app has no "back"
         if !app::running() || m.page.is_some() {
@@ -168,21 +173,27 @@ mod view {
             unsafe { *(data as *mut u8).add(4) = 1 };
             return;
         }
+        // a horizontal pager pages on a right swipe: the stock skips back for its workout screens (docs/recon.md),
+        // so the swipe is no BUTTON while one lives. The crown press still is (and still escapes).
+        if code & 0xFFFF == KEY_BACK && crate::lv::hpager() {
+            unsafe { *(data as *mut u8).add(4) = 1 };
+            return;
+        }
         // an app that owns "back" and read the last BUTTON gets a fresh escape window per press (ABI 1.3)
         let owned_read = app::OWN_BACK.load(Ordering::Acquire) && app::CONSUMED.load(Ordering::Acquire);
-        if e.kind == BUTTON && !app::paused() && (m.button_at == 0 || owned_read) {
+        let arm = e.kind == BUTTON && (m.button_at == 0 || owned_read);
+        // armed only once the BUTTON is queued: a full queue drops it, the app never sees it. The app thread (prio
+        // 14) cannot run between the push and the store on this thread.
+        if to_app(e) && arm {
             app::CONSUMED.store(false, Ordering::Release);
             m.button_at = app::millis() | 1;
         }
-        to_app(e);
         unsafe { *(data as *mut u8).add(4) = 1 };
     }
 
-    // dropped while paused
-    fn to_app(e: Event) {
-        if app::running() && !app::paused() {
-            app::QUEUE.push(e);
-        }
+    // dropped while paused or on a full queue
+    fn to_app(e: Event) -> bool {
+        app::running() && !app::paused() && app::QUEUE.push(e)
     }
 
     // the image or the LVGL root (ABI 1.2): only shown while an app runs
@@ -328,11 +339,14 @@ mod view {
         motor::watchdog();
         svc::tick(app::running(), app::paused());
         crate::hr::tick(app::running(), app::paused());
+        crate::media::tick(app::running(), app::paused());
         hold_face(app::running() && m.page.is_none());
         if app::running() {
             let exited = app::exited();
             let owned = app::OWN_BACK.load(Ordering::Acquire);
-            let escape = escape_due(owned, m.button_at, app::CONSUMED.load(Ordering::Acquire), app::millis());
+            let consumed = app::CONSUMED.load(Ordering::Acquire);
+            let polled = app::POLLED_AT.load(Ordering::Relaxed);
+            let escape = escape_due(owned, m.button_at, consumed, polled, app::millis());
             if exited.is_some() || escape {
                 app::stop_app();
                 show_app(false);

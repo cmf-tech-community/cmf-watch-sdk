@@ -17,6 +17,8 @@ pub const MESSAGE: u8 = 7;
 pub const LV: u8 = 8;
 // loader of 2026-11-14, no ABI bump (docs/abi-1.4.md): x = 1 on the wrist, delta = bpm (0 = no reading)
 pub const HEART: u8 = 9;
+// loader of 2026-11-16, no ABI bump (docs/abi-1.4.md, "Music"): x = 1 playing, y = 1 phone media available
+pub const MEDIA: u8 = 10;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
@@ -141,11 +143,30 @@ pub struct Api {
 
 /// A running app is force-stopped this long after a BUTTON (`button_at`, millis | 1; 0 = none).
 pub const ESCAPE_MS: u32 = 1000;
+/// An app that owns "back" counts as hung once it has neither read the BUTTON nor called next_event for this long:
+/// a view rebuild or a save may keep a live app away from its queue for more than ESCAPE_MS.
+pub const HANG_MS: u32 = 5000;
 
 /// Whether to force-stop the app now. An app that owns "back" (ABI 1.3) is stopped only if it did not read the
-/// BUTTON within ESCAPE_MS (hung); any other app always is.
-pub fn escape_due(owned: bool, button_at: u32, consumed: bool, now: u32) -> bool {
-    button_at != 0 && !(owned && consumed) && now.wrapping_sub(button_at) >= ESCAPE_MS
+/// BUTTON and did not call next_event (`polled_at`, millis) for HANG_MS (hung); any other app always is.
+pub fn escape_due(owned: bool, button_at: u32, consumed: bool, polled_at: u32, now: u32) -> bool {
+    if button_at == 0 {
+        return false;
+    }
+    if !owned {
+        return now.wrapping_sub(button_at) >= ESCAPE_MS;
+    }
+    !consumed && now.wrapping_sub(button_at) >= HANG_MS && now.wrapping_sub(polled_at) >= HANG_MS
+}
+
+/// Stock msgbox id of the AOD overlay (`docs/recon.md`, "Screen-off and the app view"): the launcher opens it with
+/// `msgbox_cache_popup(0x113, 0)` once the panel goes dark.
+pub const AOD_MSGBOX: u16 = 0x113;
+
+/// Whether a stock popup covers the app: `flags` = u8 `0x3800FAF4`, bit 0 with id `ids[0]` (`0x3800FAF6`), bit 1
+/// with `ids[1]` (`0x3800FAF8`). The AOD overlay does not: the app keeps running (and measuring) in AOD.
+pub fn popup_covers(flags: u8, ids: [u16; 2]) -> bool {
+    (flags & 1 != 0 && ids[0] != AOD_MSGBOX) || (flags & 2 != 0 && ids[1] != AOD_MSGBOX)
 }
 
 #[repr(C)]
@@ -186,6 +207,34 @@ mod tests {
         q.push(Event::default());
         q.clear();
         assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn escape() {
+        // any other app: 1 s after the press, read or not
+        assert!(!escape_due(false, 1, true, 900, 1000));
+        assert!(escape_due(false, 1, true, 1000, 1001));
+        assert!(!escape_due(true, 0, false, 0, 99_999));
+        // own_back: a read BUTTON never stops it
+        assert!(!escape_due(true, 1, true, 0, 99_999));
+        // busy (no next_event) for 2 s after the press: alive
+        assert!(!escape_due(true, 1001, false, 900, 3001));
+        // polling, BUTTON still behind other events: alive
+        assert!(!escape_due(true, 1001, false, 9000, 10_000));
+        // neither read nor polled for HANG_MS: hung
+        assert!(escape_due(true, 1001, false, 900, 1001 + HANG_MS));
+        assert!(escape_due(true, u32::MAX - 100, false, u32::MAX - 200, HANG_MS));
+    }
+
+    #[test]
+    fn aod_is_no_popup() {
+        assert!(!popup_covers(0, [262, 262]));
+        assert!(popup_covers(1, [262, 0]));
+        assert!(popup_covers(2, [0, 246]));
+        assert!(!popup_covers(1, [AOD_MSGBOX, 0]));
+        assert!(!popup_covers(2, [0, AOD_MSGBOX]));
+        // a call box over AOD still pauses
+        assert!(popup_covers(3, [AOD_MSGBOX, 246]));
     }
 
     #[test]
@@ -235,14 +284,5 @@ mod tests {
         assert_eq!(offset_of!(Time, utc_offset_min), offset_of!(cmf_wp2_app::Time, utc_offset_min));
         assert_eq!(size_of::<Event>(), size_of::<cmf_wp2_app::Event>());
         assert_eq!(HEART, cmf_wp2_app::HEART);
-    }
-
-    #[test]
-    fn escape_rule() {
-        assert!(escape_due(false, 1, false, 1001)); // not owned: 1000 ms after the press
-        assert!(!escape_due(false, 1, false, 1000));
-        assert!(!escape_due(true, 1, true, 5000)); // owned and consumed: never
-        assert!(escape_due(true, 1, false, 1001)); // owned, hung: still killable
-        assert!(!escape_due(true, 0, false, 9999)); // no press
     }
 }
