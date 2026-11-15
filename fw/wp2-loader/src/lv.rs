@@ -107,6 +107,9 @@ pub extern "C" fn submit(buf: *const u8, len: usize) -> i32 {
     if let Some((sensor, on)) = lvcmd::sensor(unsafe { core::slice::from_raw_parts(buf, len) }) {
         return crate::hr::request(sensor, on);
     }
+    if let Some(rec) = lvcmd::widget(unsafe { core::slice::from_raw_parts(buf, len) }) {
+        return crate::svc::save_widget(rec);
+    }
     REQ_PTR.store(p as u32, Ordering::Relaxed);
     REQ_LEN.store(len as u32, Ordering::Relaxed);
     STATE.store(PENDING, Ordering::Release);

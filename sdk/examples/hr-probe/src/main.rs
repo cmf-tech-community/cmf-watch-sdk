@@ -31,6 +31,17 @@ fn draw(api: &Api, bpm: i16) {
     api.show();
 }
 
+// the card widget (docs/app-guide.md, "Widget"): the last reading, written once on exit
+fn widget(api: &Api, bpm: i32) {
+    let mut text = *b"--- bpm";
+    if bpm > 0 {
+        let b = bpm as u16;
+        text[..3].copy_from_slice(&[b'0' + (b / 100 % 10) as u8, b'0' + (b / 10 % 10) as u8, b'0' + (b % 10) as u8]);
+    }
+    let value = if bpm > 0 { core::str::from_utf8(&text).unwrap_or("") } else { "No reading" };
+    api.widget("Last heart rate", value);
+}
+
 fn main(api: &'static Api) -> i32 {
     let mut on = true;
     put(0, api.heart_rate(on));
@@ -49,7 +60,10 @@ fn main(api: &'static Api) -> i32 {
                 put(0, api.heart_rate(on));
             }
             Some(e) if e.kind == CROWN => panic!("crash test"),
-            Some(e) if e.kind == BUTTON => return 0,
+            Some(e) if e.kind == BUTTON => {
+                widget(api, get(2));
+                return 0;
+            }
             _ => {}
         }
     }

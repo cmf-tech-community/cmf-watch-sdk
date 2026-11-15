@@ -90,6 +90,7 @@ mod view {
                 m.scr = scr;
                 m.entries = menu::scan();
                 menu::lv::build(scr, &m.entries, row_cb, long_cb);
+                launch_widget(m);
                 0
             }
             FOCUS | DEFOCUS => {
@@ -201,6 +202,18 @@ mod view {
         }
     }
 
+    // a tap on an app widget (stub card.rs) opened the view: start that slot as if its row was tapped; an
+    // uninstalled slot leaves the menu
+    fn launch_widget(m: &mut Menu) {
+        let want = core::mem::take(&mut wp2_core::layout::stub_ram().launch);
+        let Some(row) = m.entries.iter().position(|e| e.is_some_and(|e| e.slot + 1 == want)) else { return };
+        m.launched = row;
+        match app::launch(want - 1) {
+            Ok(()) => show_app(true),
+            Err(code) => fail(row, code),
+        }
+    }
+
     // LONG_PRESSED on a menu row: ask before deleting the app
     extern "C" fn long_cb(e: *mut c_void) {
         let row = menu::lv::row_of(e);
@@ -234,6 +247,7 @@ mod view {
         fs::unlink(&layout::slot_path(entry.slot, false));
         fs::unlink(&layout::data_path(entry.slot, false));
         fs::unlink(&layout::data_path(entry.slot, true));
+        fs::unlink(&layout::widget_path(entry.slot));
         m.failed = None;
         menu::lv::delete();
         m.entries = menu::scan();

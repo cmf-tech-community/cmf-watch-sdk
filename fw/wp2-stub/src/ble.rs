@@ -228,6 +228,7 @@ fn msg(ram: &mut StubRam, slot: u8, data: &[u8]) -> Status {
 fn drop_data(slot: u8) {
     fs::unlink(&data_path(slot, false));
     fs::unlink(&data_path(slot, true));
+    fs::unlink(&wp2_core::layout::widget_path(slot));
 }
 
 // EVENT frames go out right after the reply to a host frame, from wewear_read: the thread that runs the stock

@@ -28,6 +28,7 @@ CURRENT_THREAD = 0x380445B8  # _kernel.cpus[0].current; k_thread name at +0x78 (
 OPEN_VIEW = 0x101898BD
 FS_FIND_MOUNT = 0x10106FA1
 FS_OPEN, FS_CLOSE, FS_WRITE, FS_SEEK, FS_SYNC = 0x10107031, 0x101071E1, 0x10107295, 0x101072F1, 0x101073A5
+FS_READ = 0x10107239
 TRACE_OFF = 0x44
 LOADER_BLOCK_OFF = 0x4E8
 APP_BLOCK_OFF = 0x4F0
@@ -555,6 +556,21 @@ def write_file(emu: Emu, path: bytes, offset: int, data: bytes):
         emu.call(FS_SYNC, file, thread=ui)
     finally:
         emu.call(FS_CLOSE, file, thread=ui)
+
+
+def read_file(emu: Emu, path: bytes, size: int) -> bytes | None:
+    """The first `size` bytes of a NAND file with the stock fs calls in ui_service; None if it does not open."""
+    file, name, buf = STUB_RAM + 0xE40, STUB_RAM + 0xE20, STUB_RAM + 0xE70
+    emu.poke(name, path + b"\0")
+    emu.poke(file, bytes(0x2C))
+    ui = b"ui_s"
+    if emu.call(FS_OPEN, file, name, 1, thread=ui):  # FS_O_READ
+        return None
+    try:
+        n = emu.call(FS_READ, file, buf, size, thread=ui)
+    finally:
+        emu.call(FS_CLOSE, file, thread=ui)
+    return emu.peek(buf, n) if 0 < n <= size else b""
 
 
 def reboot(emu: Emu, port: int):

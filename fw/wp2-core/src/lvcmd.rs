@@ -508,6 +508,15 @@ pub fn focus_shape(d: i32) -> (i32, u32, u32) {
     }
 }
 
+/// WIDGET record (op 0x14, handle 0, payload = the 64-byte widget record, docs/app-guide.md "Widget"), alone in a
+/// batch: the loader writes it to the app's N.wgt on the app thread. On an older loader op 0x14 is `Malformed`.
+pub fn widget(buf: &[u8]) -> Option<&[u8; crate::layout::WIDGET_REC]> {
+    match buf {
+        [0x14, 64, 0, 0, rec @ ..] => rec.try_into().ok(),
+        _ => None,
+    }
+}
+
 /// SENSOR record (op 0x13, handle 0, payload `[sensor, on]`), alone in a batch: the loader takes it on the app
 /// thread before LVGL, so a canvas app may send it (docs/abi-1.4.md, "Heart rate"). Inside a longer batch, and
 /// on an older loader, op 0x13 is `Malformed` (-22).
@@ -850,6 +859,16 @@ mod tests {
         assert_eq!(v(&[value(1, 193)]), Err(Error::BadValue));
         assert_eq!(v(&[value(2, 0)]), Err(Error::BadClass));
         assert_eq!(v(&[r(1, 4, &[10, 0, 0])]), Err(Error::BadValue), "no class 10");
+    }
+
+    #[test]
+    fn widget_record() {
+        let rec = cmf_wp2_app::widget_record("Vibration Lab", "Strength 35%\nFreq 170Hz");
+        let got = widget(&rec).expect("a widget record");
+        assert_eq!(&got[..14], b"Vibration Lab\0");
+        assert_eq!(&got[24..48], b"Strength 35%\nFreq 170Hz\0");
+        assert_eq!(widget(&rec[..67]), None, "short");
+        assert_eq!(widget(&[0x13, 2, 0, 0, 1, 1]), None);
     }
 
     #[test]

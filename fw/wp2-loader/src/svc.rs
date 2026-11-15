@@ -152,6 +152,18 @@ pub extern "C" fn save(data: *const u8, len: usize) -> i32 {
     if fs::rename(&new, &dat) < 0 { E_IO } else { 0 }
 }
 
+// the app's widget record (lv_submit WIDGET): overwritten in place, the stub reads it when a card is laid out.
+// ponytail: no tmp + rename as in save(); a cut write shows a garbled card until the next one
+pub fn save_widget(rec: &[u8; wp2_core::layout::WIDGET_REC]) -> i32 {
+    let Some(slot) = slot() else { return E_IO };
+    let mut file: fs::File = [0; 0x2C];
+    if fs::open(&mut file, &wp2_core::layout::widget_path(slot), fs::WRITE | fs::CREATE) < 0 {
+        return E_IO;
+    }
+    let ok = fs::write(&mut file, rec) == rec.len() as i32;
+    if fs::close(&mut file) < 0 || !ok { E_IO } else { 0 }
+}
+
 enum Blob {
     Missing,
     Bad,

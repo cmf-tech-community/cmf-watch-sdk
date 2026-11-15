@@ -105,10 +105,23 @@ mod device {
         None
     }
 
+    // the card widget (docs/app-guide.md, "Widget"): the last preset, on exit
+    fn widget(api: &Api, settings: &Settings) {
+        let mut value = Line::new();
+        let _ = write!(value, "{}\n{}", label(settings, Field::Strength).as_str(), label(settings, Field::Pattern).as_str());
+        api.widget("Vibration Lab", value.as_str());
+    }
+
     fn main(api: &'static Api) -> i32 {
         let mut settings = Settings::default();
+        let code = run(api, &mut settings);
+        widget(api, &settings);
+        code
+    }
+
+    fn run(api: &Api, settings: &mut Settings) -> i32 {
         let mut selected = 0;
-        draw(api, &settings, selected);
+        draw(api, settings, selected);
         loop {
             let Some(event) = api.event(u32::MAX) else { continue };
             match event.kind {
@@ -118,7 +131,7 @@ mod device {
                 }
                 CROWN if event.delta != 0 => settings.adjust(FIELDS[selected], event.delta.signum()),
                 TOUCH_DOWN if event.y >= PLAY_TOP && event.y < PLAY_TOP + PLAY_HEIGHT => {
-                    if let Some(code) = play(api, &settings) {
+                    if let Some(code) = play(api, settings) {
                         return code;
                     }
                 }
@@ -128,7 +141,7 @@ mod device {
                 RESUME => {}
                 _ => continue,
             }
-            draw(api, &settings, selected);
+            draw(api, settings, selected);
         }
     }
 }

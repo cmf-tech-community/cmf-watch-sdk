@@ -30,6 +30,7 @@ pub extern "C" fn wp2_view_proc(view_id: u32, msg: u32, data: *mut c_void) -> i3
         }
     }
     if ram.loader_state != 1 {
+        ram.launch = 0; // a widget tap must not start its app on a later, unrelated menu open
         return REFUSE;
     }
     ram.loader_active = 1;
