@@ -251,12 +251,15 @@ def cmd_bridge(args):
 def cmd_cards(args):
     from . import cards
 
+    if args.action == "set":  # a bad spec fails here, before the watch is touched
+        new = cards.Cards(args.wrap, tuple(cards.parse_card(c) for c in args.card))
+        cards.encode_set(new)
+
     async def run(s):
+        nonlocal new
         if args.action == "get":
             return await cards.get(s)
-        if args.action == "set":
-            new = cards.Cards(args.wrap, tuple(cards.parse_card(c) for c in args.card))
-        else:
+        if args.action != "set":
             new = cards.with_apps(await cards.get(s))
         await cards.put(s, new)
         return await cards.get(s)

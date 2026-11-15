@@ -1,8 +1,15 @@
 import asyncio
+import contextlib
+import io
 import unittest
+from unittest import mock
 
-from wp2apps import cards
+from wp2apps import cards, cli
 from wp2apps.cards import Cards, View, Widgets
+
+
+def quiet():
+    return contextlib.redirect_stderr(io.StringIO())
 
 
 class FakeSession:
@@ -53,8 +60,25 @@ class CardsTest(unittest.TestCase):
     def test_parse_card(self):
         self.assertEqual(cards.parse_card("view:0xB2"), View(0xB2))
         self.assertEqual(cards.parse_card("widgets:0x19,64/2"), Widgets(((0x19, 0), (64, 2))))
-        with self.assertRaises(ValueError):
-            cards.parse_card("tile:1")
+        for bad in ("tile:1", "view:", "widgets:", "widgets:1,,2", "view:0xB2,1", "widgets:0x40/2/3"):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                cards.parse_card(bad)
+
+    def test_cli_set_args(self):
+        args = cli.parser().parse_args(["cards", "set", "view:0xB2", "widgets:0x40/2", "--wrap", "--hci-port", "9"])
+        self.assertEqual((args.action, args.card, args.wrap, args.hci_port), ("set", ["view:0xB2", "widgets:0x40/2"],
+                                                                               True, 9))
+        with quiet(), self.assertRaises(SystemExit):
+            cli.parser().parse_args(["cards", "set", "view:0xB2"])  # no --hci-port / --address
+
+    def test_cli_set_rejects_bad_cards_before_connecting(self):
+        for card in ("view:", "widgets:0x100", "tile:1"):
+            with self.subTest(card), mock.patch.object(cli, "with_watch") as watch, quiet():
+                self.assertEqual(cli.main(["cards", "set", card, "--hci-port", "9"]), 1)
+                watch.assert_not_called()
+        with mock.patch.object(cli, "with_watch") as watch, quiet():
+            self.assertEqual(cli.main(["cards", "set", *["view:1"] * 9, "--hci-port", "9"]), 1)
+            watch.assert_not_called()
 
     def test_get_and_put_requests(self):
         s = FakeSession(bytes.fromhex("010101 02b200"))

@@ -301,6 +301,10 @@ class FirmwareTest(unittest.TestCase):
     def test_widget_entry_checked(self):
         for name, stub in (("misaligned", fake_stub(widget=WIDGET_AT + 2, entry=widget_entry())),
                            ("outside", fake_stub(widget=0x1025A080 + 0x120, entry=widget_entry())),
+                           ("past the end", fake_stub(widget=0x1025A080 + 0x120 - firmware.WGT_ENTRY.size + 4)),
+                           ("before the stub", fake_stub(widget=0x1025A07C)),
+                           ("callback at the end", fake_stub(widget=WIDGET_AT, entry=widget_entry(
+                               callbacks=CALLBACKS[:4] + (0x1025A080 + 0x120 + 1,)))),
                            ("other id", fake_stub(widget=WIDGET_AT, entry=widget_entry(wid=0x41))),
                            ("arm callback", fake_stub(widget=WIDGET_AT, entry=widget_entry(callbacks=(0x1025A0A0,) * 5))),
                            ("callback out of the stub", fake_stub(widget=WIDGET_AT,
