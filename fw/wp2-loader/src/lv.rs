@@ -32,6 +32,8 @@ const FOCUS_CB: u8 = 0x40;
 const SCROLL: u32 = 11;
 const LAYOUT_CHANGED: u32 = 43;
 const STATE_CHECKED: u32 = 0x01;
+// LV_DIR_TOP | LV_DIR_BOTTOM: a page scrolls the pager vertically only
+const DIR_VER: u32 = 0x0C;
 // lv_obj_t coords: i32 x1 y1 x2 y2 at +0x14 (docs/recon-lvgl.md)
 const Y1: usize = 0x18;
 const Y2: usize = 0x20;
@@ -56,7 +58,7 @@ struct Lv {
     objs: [Obj; MAX_OBJS + 1],
     // EVENTS bits with a callback, plus KNOB_CB
     events: [u8; MAX_OBJS + 1],
-    // roller option count, 0 = OPTIONS never set
+    // roller option count, 0 = OPTIONS never set; a pager's page (the one shown, or the one it is gliding to)
     options: [u8; MAX_OBJS + 1],
     // lv_font_t (0x20 B) per slot: styles point here, so it lives as long as the loader block
     fonts: [[u32; 8]; MAX_FONTS as usize],
@@ -195,11 +197,27 @@ fn exec(r: &Rec) -> Result<(), i32> {
                 Class::Bar => LV_BAR_CREATE,
                 Class::Slider => LV_SLIDER_CREATE,
                 Class::Roller => LV_ROLLER_CREATE,
+                Class::Pager => LV_TILEVIEW_CREATE,
+                Class::Page => {
+                    // the next row of its pager (validated: the parent is a pager)
+                    let row = stock!(LV_OBJ_GET_CHILD_CNT, fn(Obj) -> u32)(o(parent));
+                    let obj = stock!(LV_TILEVIEW_ADD_TILE, fn(Obj, u32, u32, u32) -> Obj)(o(parent), 0, row, DIR_VER);
+                    let h = h as usize;
+                    (s.objs[h], s.events[h], s.options[h]) = (obj, 0, 0);
+                    return Ok(());
+                }
                 Class::ScrollBar => return Err(-22),
             };
             let obj = stock!(create, fn(Obj) -> Obj)(o(parent));
             let h = h as usize;
             (s.objs[h], s.events[h], s.options[h]) = (obj, 0, 0);
+            if class == Class::Pager {
+                // the page it settles on goes to the app; the crown steps pages (on_event), as a roller takes the knob
+                add_cb(obj, on_pager, VALUE_CHANGED, h);
+                add_cb(obj, on_event, ui::KNOB, h);
+                s.events[h] = KNOB_CB;
+                stock!(LV_DISP_ADD_KNOB_OBJ, fn(Obj))(obj);
+            }
         }
         Rec::Del(h) => {
             // before the delete: deleting children sends the container LAYOUT_CHANGED, and its fisheye must not touch
@@ -239,6 +257,7 @@ fn exec(r: &Rec) -> Result<(), i32> {
         Rec::Value { h, v, anim } => match s.table.class(h) {
             // validated: arc values fit i16, roller indices u16
             Some(Class::Arc) => stock!(LV_ARC_SET_VALUE, fn(Obj, i16))(o(h), v as i16),
+            Some(Class::Pager) => go_page(h, v as u32, anim),
             Some(Class::Roller) => {
                 let n = s.options[h as usize];
                 if n != 0 {
@@ -279,7 +298,10 @@ fn exec(r: &Rec) -> Result<(), i32> {
         }
         Rec::Knob(h) => {
             let obj = o(h);
-            if stock!(LV_OBJ_HAS_FLAG, fn(Obj, u32) -> bool)(obj, FLAG_SCROLLABLE) {
+            if s.table.class(h) == Some(Class::Pager) {
+                // its crown callback is registered at CREATE
+                stock!(LV_DISP_ADD_KNOB_OBJ, fn(Obj))(obj);
+            } else if stock!(LV_OBJ_HAS_FLAG, fn(Obj, u32) -> bool)(obj, FLAG_SCROLLABLE) {
                 // the crown scrolls it; the flag registers it as the knob object. A flag set before (by its
                 // SCROLLBAR) registers nothing, and a roller created since holds the knob: make it current
                 stock!(LV_OBJ_ADD_FLAG, fn(Obj, u32))(obj, FLAG_KNOB);
@@ -408,12 +430,19 @@ extern "C" fn on_event(e: *mut c_void) {
     }
     let code = ui::event_code(e);
     let h = stock!(LV_EVENT_GET_USER_DATA, fn(*mut c_void) -> usize)(e) as u16;
+    if code == ui::KNOB && st().table.class(h) == Some(Class::Pager) {
+        pager_crown(h, ui::knob_step(e));
+        return;
+    }
     if code == ui::KNOB {
         let step = ui::knob_step(e).signum() as i16;
         if step != 0 {
             app::QUEUE.push(Event { kind: CROWN, delta: step, ..Event::default() });
         }
         return;
+    }
+    if code == VALUE_CHANGED && st().table.class(h) == Some(Class::Pager) {
+        return; // on_pager reports it, with the page
     }
     let mut ev = Event { kind: LV, x: h as i16, y: code as i16, ..Event::default() };
     if code != VALUE_CHANGED {
@@ -429,6 +458,67 @@ extern "C" fn on_event(e: *mut c_void) {
     };
     ev.delta = v.clamp(i16::MIN.into(), i16::MAX.into()) as i16;
     app::QUEUE.coalesce(ev);
+}
+
+fn child(o: Obj, i: u32) -> Obj {
+    stock!(LV_OBJ_GET_CHILD, fn(Obj, i32) -> Obj)(o, i as i32)
+}
+
+// Glides the pager to page `i` (the last one past the end); its VALUE_CHANGED follows when the glide ends.
+fn go_page(h: u16, i: u32, anim: bool) {
+    let obj = st().objs[h as usize];
+    let n = stock!(LV_OBJ_GET_CHILD_CNT, fn(Obj) -> u32)(obj);
+    if n == 0 {
+        return;
+    }
+    let i = i.min(n - 1);
+    st().options[h as usize] = i as u8;
+    stock!(LV_OBJ_SET_TILE_ID, fn(Obj, u32, u32, u32))(obj, 0, i, anim.into());
+}
+
+// The crown on a pager, like a drag: the page's own content scrolls first (by the stock crown step), and at its end
+// the next step glides to the next page. `step` > 0 moves down the content (to the next page).
+fn pager_crown(h: u16, step: i32) {
+    if step == 0 {
+        return; // the "crown still" event
+    }
+    let s = st();
+    let obj = s.objs[h as usize];
+    let at = u32::from(s.options[h as usize]);
+    let page = child(obj, at);
+    if page.is_null() {
+        return;
+    }
+    let y = stock!(LV_OBJ_GET_SCROLL_Y, fn(Obj) -> i32)(page);
+    let room = if step > 0 { stock!(LV_OBJ_GET_SCROLL_BOTTOM, fn(Obj) -> i32)(page) } else { y };
+    if room > 0 {
+        let dy = step.abs().min(room) * step.signum();
+        stock!(LV_OBJ_SCROLL_TO_Y, fn(Obj, i32, u32))(page, y + dy, 0);
+    } else if crate::app::millis().wrapping_sub(unsafe { PAGED_AT }) < GLIDE_MS {
+        // a turn gives many steps: one page per glide, not one per step (the stock tileview sets its active tile at
+        // the glide's start, so it cannot tell a glide)
+    } else if step > 0 || at > 0 {
+        unsafe { PAGED_AT = crate::app::millis() };
+        go_page(h, if step > 0 { at + 1 } else { at - 1 }, true);
+    }
+}
+
+const GLIDE_MS: u32 = 400;
+static mut PAGED_AT: u32 = 0;
+
+// VALUE_CHANGED of a pager (the stock tileview sends it when a scroll settles on a page): the page index to the app.
+// user_data = handle
+extern "C" fn on_pager(e: *mut c_void) {
+    let h = stock!(LV_EVENT_GET_USER_DATA, fn(*mut c_void) -> usize)(e) as u16;
+    let s = st();
+    let obj = s.objs[h as usize];
+    let act = stock!(LV_TILEVIEW_GET_TILE_ACT, fn(Obj) -> Obj)(obj);
+    let n = stock!(LV_OBJ_GET_CHILD_CNT, fn(Obj) -> u32)(obj);
+    let Some(i) = (0..n).find(|&i| child(obj, i) == act) else { return };
+    s.options[h as usize] = i as u8;
+    if app::running() && !app::paused() {
+        app::QUEUE.coalesce(Event { kind: LV, x: h as i16, y: VALUE_CHANGED as i16, delta: i as i16, ..Event::default() });
+    }
 }
 
 /// UI thread, app thread aborted, before the app block is freed: nothing of the app is left in LVGL.

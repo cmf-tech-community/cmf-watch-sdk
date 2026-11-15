@@ -40,6 +40,15 @@ pub enum Class {
     Bar = 4,
     Slider = 5,
     Roller = 6,
+    /// The stock `lv_tileview` as a vertical pager: full-screen pages that snap, one per swipe or crown step. Its
+    /// children are [`Class::Page`]s only. It takes the crown when created; the app gets
+    /// `Event { kind: LV, x: pager, y: VALUE_CHANGED, delta: page }` when it settles on a page, without
+    /// [`Batch::events`]. [`Batch::value`] glides to a page. Loader of 2026-11-14; an older one answers -22.
+    /// Use [`crate::stock::pager`].
+    Pager = 8,
+    /// The next page of its [`Class::Pager`] parent, as large as the pager. Content taller than it scrolls inside the
+    /// page first, and the pager pages at its end, by drag and by crown alike. Goes with its pager (no `del`).
+    Page = 9,
 }
 
 /// `lv_align_t`.
@@ -317,7 +326,7 @@ impl Batch {
     /// Deletes `obj`, its children and scroll bars; their handles are free again. A scroll bar itself is refused
     /// (`INVALID`): it goes with its target.
     pub fn del(&mut self, obj: Obj) -> Result<(), LvError> {
-        if obj == ROOT || !self.live(obj) || self.class[obj.0 as usize] == SCROLLBAR {
+        if obj == ROOT || !self.live(obj) || [SCROLLBAR, Class::Page as u8].contains(&self.class[obj.0 as usize]) {
             return Err(INVALID);
         }
         self.put(0x02, obj.0, &[])?;
@@ -372,7 +381,7 @@ impl Batch {
         self.put(0x08, obj.0, &[text.as_bytes()])
     }
 
-    /// Arc (`i16`), bar, slider; a roller's selected row.
+    /// Arc (`i16`), bar, slider; a roller's selected row; a pager's page (it glides there with `anim`).
     pub fn value(&mut self, obj: Obj, v: i32, anim: bool) -> Result<(), LvError> {
         self.put(0x09, obj.0, &[&v.to_le_bytes(), &[anim as u8]])
     }

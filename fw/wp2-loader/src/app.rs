@@ -190,6 +190,7 @@ extern "C" fn present() {
 extern "C" fn next_event(ev: *mut Event, timeout_ms: u32) -> bool {
     let start = millis();
     loop {
+        hr::emit();
         if let Some(e) = QUEUE.pop() {
             if e.kind == BUTTON {
                 CONSUMED.store(true, Ordering::Release);

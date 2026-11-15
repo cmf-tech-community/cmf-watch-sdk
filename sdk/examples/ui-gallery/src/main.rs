@@ -1,6 +1,6 @@
 //! ui-gallery: the watch's own widgets (ABI 1.2, LVGL) in the stock look: a stock focus list of sections (lists,
 //! buttons, switches, gauges, a time picker, the stock fonts); a section opens on a tap and goes back with its
-//! title or "Back". The crown scrolls. Host messages for tests/test_gallery_e2e.py: `!open N`, `!menu`.
+//! title or "Back". The crown scrolls. "Pages" is the vertical pager (`stock::pager`). Host messages for tests/test_gallery_e2e.py: `!open N`, `!menu`.
 #![cfg_attr(target_os = "none", no_std, no_main)]
 
 #[cfg_attr(not(target_os = "none"), allow(dead_code))]
@@ -27,9 +27,10 @@ mod device {
     const OPEN: usize = 1;
     const OPENED: usize = 2;
     const TICKS: usize = 3;
+    const PAGE: usize = 4;
     // non-zero: in .data, fresh at every launch; RC 1 until the menu is built
     #[unsafe(no_mangle)]
-    static mut STATS: [i32; 4] = [1, 0, 0, 0];
+    static mut STATS: [i32; 5] = [1, 0, 0, 0, 0];
 
     fn set(i: usize, v: i32) {
         unsafe { (&raw mut STATS[i]).write_volatile(v) }
@@ -72,6 +73,14 @@ mod device {
             match e.kind {
                 BUTTON => break,
                 PAUSE => motor.off(),
+                LV if s.pager.is_some_and(|p| p.page(&e).is_some()) => {
+                    if let Some(p) = s.pager.as_mut() {
+                        if let Ok(Some(i)) = p.event(&mut b, &e) {
+                            set(PAGE, i as i32);
+                        }
+                    }
+                    set(RC, code(b.submit(&lv)));
+                }
                 LV => {
                     let h = e.x as u16;
                     if e.y == CLICKED {
@@ -131,6 +140,7 @@ mod device {
                     Err(e) => set(RC, code(Err(e))),
                 }
                 (hour, minute) = (7, 30);
+                set(PAGE, 0);
             }
         }
         motor.off();

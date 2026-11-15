@@ -52,6 +52,7 @@ class HeartRateTest(unittest.TestCase):
             self.assert_on(emu, True, "measurement on (property 2)")
             self.assertIn("ux2sys change_hr_mode :1", emu.uart()[mark:])
             self.assertIn("VC9202 Start Later---m0 h1", emu.uart()[mark:])
+            self.assertNotIn("set_autosleep_time:25000", emu.uart()[mark:], "no screen hold: the panel keeps its timeout")
             self.assertEqual(emu.peek(BPM, 1), b"\x00", "no reading before the sensor gives one")
 
             emu.poke(BPM, bytes([67]))
@@ -100,6 +101,25 @@ class HeartRateTest(unittest.TestCase):
             uart = emu.uart()
             self.assertNotIn("ZEPHYR FATAL ERROR", uart)
             self.assertEqual(uart.count("*** Booting Zephyr"), 1, "guest rebooted")
+
+    def test_dark_panel(self):
+        """It keeps measuring while the panel is dark (AOD on hardware): readings still reach the app, no restart."""
+        from tests.test_back_e2e import ScreenOffTest
+        with harness.installed(["loader", "hr-probe"], name="hr-dark") as (emu, port):
+            ScreenOffTest().open(emu, port)
+            emu.sleep(2)
+            self.assert_on(emu, True)
+            emu.poke(BPM, bytes([67]))
+            emu.sleep(2)
+            self.assertEqual(self.probe(emu)[DELTA], 67)
+            dark = []
+            ScreenOffTest.blank_and_wake(emu, port, during=lambda: (emu.poke(BPM, bytes([71])), emu.sleep(2.5), dark.append(
+                (self.owner(emu), emu.peek(REQUESTS, 1)[0], self.probe(emu)[DELTA]))))
+            self.assertEqual(dark, [(1, 1, 71)], "on in the dark, the app gets the reading")
+            emu.sleep(1)
+            self.assert_on(emu, True, "still the one start after the wake")
+            self.assertEqual(self.probe(emu)[DELTA], 71, "no restart on wake")
+            self.assertTrue(self.running(emu))
 
 
 if __name__ == "__main__":

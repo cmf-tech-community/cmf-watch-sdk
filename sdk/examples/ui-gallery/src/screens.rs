@@ -5,8 +5,17 @@
 use cmf_wp2_app::lv::*;
 use cmf_wp2_app::stock::{self, ACCENT, CIRCLE, GREY, ICON, LETTER_BG, ROW_BG, ROW_PRESSED, ROW_W, WHITE};
 
-pub const SECTIONS: [(&str, &str); 6] =
-    [("L", "Lists"), ("B", "Buttons"), ("S", "Switches"), ("G", "Gauges"), ("P", "Picker"), ("F", "Fonts")];
+pub const SECTIONS: [(&str, &str); 7] = [
+    ("L", "Lists"),
+    ("B", "Buttons"),
+    ("S", "Switches"),
+    ("G", "Gauges"),
+    ("P", "Picker"),
+    ("F", "Fonts"),
+    ("V", "Pages"),
+];
+/// The section with the vertical pager.
+pub const PAGES: usize = 6;
 pub const N: usize = SECTIONS.len();
 /// Font slots besides the system font (slot 0).
 pub const F24: u8 = 1;
@@ -35,6 +44,7 @@ pub struct Screen {
     pub hours: Obj,
     pub minutes: Obj,
     pub picked: Obj,
+    pub pager: Option<stock::Pager<3>>,
 }
 
 const EMPTY: Screen = Screen {
@@ -52,6 +62,7 @@ const EMPTY: Screen = Screen {
     hours: ROOT,
     minutes: ROOT,
     picked: ROOT,
+    pager: None,
 };
 
 fn room(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError>) -> Result<(), LvError> {
@@ -165,6 +176,9 @@ fn labelled(b: &mut Batch, parent: Obj, text: &str) -> Result<(Obj, Obj), LvErro
 pub fn section(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError>, i: usize)
     -> Result<Screen, LvError> {
     room(b, flush)?;
+    if i == PAGES {
+        return pages(b, flush);
+    }
     let (page, _bar) = stock::page(b)?;
     let mut s = Screen { page, section: Some(i), ..EMPTY };
     let title = stock::title(b, page, SECTIONS[i].1)?;
@@ -323,6 +337,49 @@ pub fn section(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), L
     }
     room(b, flush)?;
     s.back[1] = button(b, page, "Back", Kind::Secondary)?;
+    Ok(s)
+}
+
+/// A page of the pager: a centred column from the title line down, `pad` px under the last child.
+fn pager_page(b: &mut Batch, page: Obj, pad: i32) -> Result<(), LvError> {
+    b.style(page, Prop::PadTop, 0, stock::TITLE_Y)?;
+    b.style(page, Prop::PadBottom, 0, pad)?;
+    b.style(page, Prop::PadRow, 0, stock::ROW_GAP)?;
+    b.flex(page, Flow::Column, FlexAlign::Start, FlexAlign::Center, FlexAlign::Start)
+}
+
+/// The pager section: three pages with dots. Page 1 a big number, page 2 rows taller than the screen (they scroll
+/// first, then the pager pages on), page 3 "Back".
+fn pages(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError>) -> Result<Screen, LvError> {
+    let p = stock::pager::<3>(b, 3)?;
+    let mut s = Screen { page: p.root, section: Some(PAGES), pager: Some(p), ..EMPTY };
+    let [one, two, three] = p.pages;
+    pager_page(b, one, 0)?;
+    let title = stock::title(b, one, "Pages")?;
+    b.flags(title, &[Flag::Clickable], &[])?;
+    b.events(title, &[Ev::Clicked])?;
+    s.back[0] = title;
+    let big = b.create(Class::Label, one)?;
+    b.style(big, Prop::TextFont, 0, F48 as i32)?;
+    b.text(big, "1 / 3")?;
+    let hint = b.create(Class::Label, one)?;
+    b.style(hint, Prop::TextColor, 0, GREY)?;
+    b.style(hint, Prop::TextFont, 0, F24 as i32)?;
+    b.text(hint, "Swipe up or turn the crown")?;
+    room(b, flush)?;
+    pager_page(b, two, stock::TITLE_Y)?;
+    stock::title(b, two, "Long page")?;
+    for (k, (letter, name)) in [("1", "One"), ("2", "Two"), ("3", "Three"), ("4", "Four"), ("5", "Five")].into_iter().enumerate() {
+        room(b, flush)?;
+        s.ticks[k] = stock::row(b, two, letter, name, "")?;
+    }
+    room(b, flush)?;
+    pager_page(b, three, 0)?;
+    stock::title(b, three, "Last page")?;
+    let big = b.create(Class::Label, three)?;
+    b.style(big, Prop::TextFont, 0, F48 as i32)?;
+    b.text(big, "3 / 3")?;
+    s.back[1] = button(b, three, "Back", Kind::Secondary)?;
     Ok(s)
 }
 
