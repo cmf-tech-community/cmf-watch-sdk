@@ -374,6 +374,33 @@ One blob of at most `STORE_MAX = 4096` bytes per slot, in `/NAND:/wp2apps/<slot>
 | `heart_rate(on: bool) -> i32` | `0`, `-22` on an older loader | Starts or stops the stock heart-rate measurement for `HEART` events. Held only while the app runs and is not paused; stopped on pause, exit, crash, force stop and view delete; started again on resume. Costs battery (the PPG LED). Works in canvas and LVGL apps; `docs/abi-1.4.md`, "Heart rate" |
 | `keep_screen_on(on: bool)` | – | Records the wish; the next UI tick takes or drops the stock wake lock. Held only while the app runs and is not paused; dropped on pause, exit, crash, force stop and view delete; taken again on resume. Costs display power: hold it with a deadline (herdr-agents: 20 s after a buzz) |
 
+### Widget (card left of the watch face)
+
+An app can have a widget on the cards left of the watch face: a wide (344×166) stock-looking tile with a grey title
+and a white value, on `#1A1C1F` in the system font. The app only stores the text; the stub draws it.
+
+| Call | Returns |
+|---|---|
+| `widget(title: &str, value: &str) -> i32` | `0`, `-5` I/O error, `-22` on a loader without widgets (before 2026-11-15) |
+
+- `title`: one line, up to 23 bytes. `value`: up to 39 bytes, `\n` starts a second line. Longer text is cut at a
+  char boundary; a line wider than the tile ends in `…`.
+- Stored in `/NAND:/wp2apps/<slot>.wgt` (64 bytes) until the next call or the app's removal. Each call writes NAND
+  synchronously: call it when the value changes or at exit, never per frame.
+- The card reads the record when it is laid out, and that happens every time the watch face shows. The app runs only
+  under the loader view, so its update is on the card the next time the user goes back to the face and swipes left.
+- Before the first call the tile shows the package name; an empty slot shows "Apps".
+- Put it on a card from the host: widget `0x40` with param `slot + 1` (`wp2apps list` shows the slot), two wide
+  widgets per card: `wp2apps cards set widgets:0x40/1,0x40/2 widgets:0x40/3 --hci-port P`. Param `0` is the "Apps"
+  tile that opens the menu.
+- A tap on the tile starts the app through the loader, as a tap on its menu row does; leaving the app goes to the menu.
+- Examples: `hello` (colour), `vibration-lab` (the last preset), `hr-probe` (the last reading), `herdr-agents`
+  (agent counts); `tests/test_app_widgets_e2e.py`.
+
+```rust
+api.widget("Vibration Lab", "Strength 35%\nPattern Tick");
+```
+
 ### Host messages (1.1)
 
 | Call | Returns |

@@ -534,7 +534,8 @@ with the bpm), the stock workout's pause, the battery cost. Calling `hr_callback
 
 ## Widget cards (face swipe left)
 
-Static only (capstone on the stock `app.bin` with the stub, 2026-11-14); nothing here is proven in the emulator yet.
+Static (capstone on the stock `app.bin` with the stub, 2026-11-14); what the emulator proved is under "Emulator
+results" below.
 The pages left of the face are the clock plus up to 7 cards. A card is either a grid of system widgets or a whole
 stock view. The phone sets the list over BLE; the firmware keeps it as one property.
 
@@ -550,7 +551,7 @@ stock view. The phone sets the list over BLE; the firmware keeps it as one prope
 | View data (`0x94` B) | `+0` screen, `+4` the card's config copy (count first), `+0x10` four 0x1C-byte widget contexts, `+0x80` four `wgt_reg` pointers, `+0x90` the timer | high (static) |
 | Widget context (`ctx`) | `+0` a copy of the presenter's first 16 bytes, `+0x10` the container, `+0x14` the state (NULL when the size is 0), `+0x18` u16 widget id | high (static) |
 | Callbacks | create `+0x10 (ctx)` and update `+0x14 (ctx)` once at layout; update every second from the timer while the slot view is on top (`0x1018C020(view_id)`); focus `+0x18 (ctx, arg)` from desc `+0x14`; reload `+0x1C (ctx, arg)` from desc `+0x24`; delete `+0xC (ctx)` from desc `+0x20` (unload), which then frees the state and deletes the screen. All but create and the first update are skipped while the state is NULL. Return values are ignored (stock no-ops return 0) | high (static) |
-| Tap | `0x101B1B14`: the action `0` does nothing, `≤ 0xF4` is `OPEN_VIEW(action, 0)` (`0x6B` first sets the sport type from the container's `user_data`), above that a function called with the event | high (static) |
+| Tap | `0x101B1B14`: the action `0` does nothing, `≤ 0xF4` is `OPEN_VIEW(action, 0)` (`0x6B` first sets the sport type from the container's `user_data`), above that a function tail-called with r0 = the container (current target), not the event | high (emulator) |
 | Widget registry `wgt_reg` | flash table **`0x101EFC88`**: 99 pointers, ids `0x00`…`0x62` (lookup returns NULL above `0x62`). **Id `0x40` is NULL** (free). Entry: `{u8 id, u8 size class (0, 1, 3; the first style of a family is 3), u16 state size, u32 resource scene, u32 tap action (a view id, or a function that opens an app), 5 callbacks}`; callbacks `+0xC` delete, `+0x10` create, `+0x14` update, `+0x18` focus, `+0x1C` reload (row "Callbacks") | high (static) |
 | BLE command | **`0x906D`**: case 27 of the `0x9052…0x908B` jump table at `0x100D351C`, handler **`0x100D0594`** (tag `view_card_setting`). Get and set; set clamps to 8 cards and 4 widgets per card, copies the 98 B to the settings store `0x38007880` and calls `0x100E05EC(0xE4, 0)` (save/refresh, assumed). The same frame carries `cycle_scrolling_sw` (pages wrap). Plaintext (session key, as every stock command): request `00` = get, `01 <wrap> <count ≤ 8> <cards>` = set, a card being `02 <u16 LE view_id>` or `01 <n ≤ 4> n × <widget_id, param_id>`; set replaces all 98 B (zeroed first). Reply **`0xA06D`**: `01 <wrap> <count> <cards>` to a get, `00` to a set. `src/wp2apps/cards.py` | high (static) |
 
@@ -583,6 +584,30 @@ frees them. The callbacks live in the stub because the loader is in memory only 
 host puts the widget on a card with `wp2apps cards add-apps` (or `cards set widgets:0x40`). Nothing X does not
 know id `0x40`; how it shows or rewrites such a list is untested.
 
-Not proven (no emulator on the machine that wrote this): the widget drawing and tapping in the emulator, whether
-the pages rebuild after a set without leaving the face, what the 1 s update costs, `param_id` of the stock
-families, byte `0x61`.
+### Emulator results (2026-11-15, stub version 4)
+
+Proven with gdb breakpoints on the stub's callbacks (probe scripts and logs in `runs/app-widgets/`, not committed) and
+`tests/test_app_widgets_e2e.py` / `tests/test_cards_e2e.py`:
+
+| Item | Finding | Confidence |
+|---|---|---|
+| `param_id` → `user_data` | card `widgets:0x40/3,0x40/0`: create gets `ctx.obj` with `*(u32 *)(obj + 0x10)` = `3` and `0` (gdb `CREATE obj=0x3806a594 user_data=0x3`, `CREATE obj=0x3806a85c user_data=0`). Set by the layout (`str r3, [r7, #0x10]` at `0x1009BB70`) before create | high (emulator) |
+| Tap action > `0xF4` | the stock handler tail-calls it (`bx r3` at `0x101B1B48`) with **r0 = the container** (`lv_event_get_current_target`), not the event: gdb `TAP obj=0x3806a594 user_data=0x3`, then UART `view_stack: jump 208 -> 240` from the stub's `OPEN_VIEW(0xF0)` | high (emulator) |
+| Card lifecycle | the card view is laid out (delete + create of every widget) when the face shows, not per swipe: face → card → face → card ran create once; a tap into view `0xF0` deleted the widgets, and crown back to the face created them again. So a record read in create is fresh after every app run | high (emulator) |
+| Tile size, grid | two wide (class 3) widgets per card at (61, 61) and (61, 239), 344×166 each | high (emulator frames) |
+
+App widgets (`fw/wp2-stub/src/card.rs`): `param_id` 0 is the "Apps" tile (opens the menu). `N` = 1…8 is the app in
+slot `N − 1`: create reads its 64-byte record `/NAND:/wp2apps/<slot>.wgt` (title at 0, value at 24, NUL-terminated)
+and draws a grey title and a white value in `font32M`; without a record it shows the package name (header `+8`),
+without a package "Apps". Update reads nothing. The tap function stores `N` in `StubRam.launch` (`+0xB`, was
+padding) and opens view `0xF0`; the loader takes it at LAYOUT and launches that slot as a row tap does (an
+uninstalled slot leaves the menu; an older loader ignores the byte and shows the menu). A refused loader load
+clears it. The app writes the record with an `lv_submit` WIDGET record (op `0x14`, alone in a batch, payload 64 B,
+`Api::widget`); the loader writes the file on the app thread. App removal (BLE `DELETE`, the menu's long press,
+another app installed into the slot) unlinks it. Stub size: `0x2B5F` → `0x2DB3` bytes; with the view table `0x3D00` of `0x4000`.
+
+Still open: a `cards set` while the card is on screen; the package icon on the tile (the stub has no room for an
+icon reader; the tile is text only); `param_id` of the stock families; byte `0x61`.
+
+Not proven in the first pass (no emulator on that machine) and settled by the emulator results above: the widget
+drawing and tapping. Still unmeasured: what the 1 s update costs (the stub's update returns at once).
