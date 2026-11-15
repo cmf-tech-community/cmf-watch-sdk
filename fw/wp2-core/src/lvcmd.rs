@@ -37,6 +37,11 @@ pub enum Class {
     Roller = 6,
     /// Loader-internal (SCROLLBAR record); CREATE with class 7 is `BadValue`.
     ScrollBar = 7,
+    /// `lv_tileview`: a vertical pager of full-screen pages that snaps to one page per swipe or crown step
+    /// (loader of 2026-11-14; an older loader answers `-22`). Its children are [`Class::Page`]s only.
+    Pager = 8,
+    /// A tileview tile, the next row of its parent [`Class::Pager`]; it scrolls its own content vertically.
+    Page = 9,
 }
 
 impl Class {
@@ -50,6 +55,8 @@ impl Class {
             5 => Class::Slider,
             6 => Class::Roller,
             7 => Class::ScrollBar,
+            8 => Class::Pager,
+            9 => Class::Page,
             _ => return None,
         })
     }
@@ -311,15 +318,18 @@ fn utf8(s: &[u8], max: usize) -> Result<(), Error> {
 fn check(t: &Table, fonts: &mut u8, r: &Rec) -> Result<(), Error> {
     let bad = |c: bool| if c { Err(Error::BadValue) } else { Ok(()) };
     match *r {
-        Rec::Create { h, parent, .. } => {
+        Rec::Create { h, class, parent } => {
             fresh(t, h)?;
-            if cls(t, parent)? == Class::ScrollBar {
+            // a pager holds pages only (each is the next row), and a page lives in a pager
+            let p = cls(t, parent)?;
+            if p == Class::ScrollBar || (p == Class::Pager) != (class == Class::Page) {
                 return Err(Error::BadClass);
             }
         }
         Rec::Del(h) => {
-            // a bar goes with its target: the target keeps callbacks into the bar (Ruling 13)
-            if child(t, h)? == Class::ScrollBar {
+            // a bar goes with its target: the target keeps callbacks into the bar (Ruling 13). A page goes with its
+            // pager: the pages after it would keep their rows and leave a gap.
+            if matches!(child(t, h)?, Class::ScrollBar | Class::Page) {
                 return Err(Error::BadClass);
             }
         }
@@ -354,6 +364,8 @@ fn check(t: &Table, fonts: &mut u8, r: &Rec) -> Result<(), Error> {
             Class::Arc => bad(i16::try_from(v).is_err())?,
             Class::Bar | Class::Slider => {}
             Class::Roller => bad(u16::try_from(v).is_err())?,
+            // the page to show; past the last one it shows the last
+            Class::Pager => bad(!(0..=MAX_OBJS as i32).contains(&v))?,
             _ => return Err(Error::BadClass),
         },
         Rec::Range { h, min, max } => {
@@ -817,6 +829,27 @@ mod tests {
             assert!(s.0 >= last.0 && s.1 <= last.1 && s.2 <= last.2, "monotonic at {d}");
             last = s;
         }
+    }
+
+    #[test]
+    fn pager_holds_pages() {
+        let t = built(&[create(1, 8, 0), create(2, 9, 1), create(3, 1, 2)]);
+        assert_eq!(t.class(1), Some(Class::Pager));
+        assert_eq!(t.class(2), Some(Class::Page));
+        let v = |b: &[Vec<u8>]| validate(&b.concat(), &t, 0);
+        assert_eq!(v(&[create(4, 9, 1)]), Ok(()));
+        assert_eq!(v(&[create(4, 9, 0)]), Err(Error::BadClass), "a page outside a pager");
+        assert_eq!(v(&[create(4, 9, 2)]), Err(Error::BadClass), "a page in a page");
+        assert_eq!(v(&[create(4, 0, 1)]), Err(Error::BadClass), "a pager holds pages only");
+        assert_eq!(v(&[create(4, 8, 2)]), Ok(()), "a pager inside a page");
+        assert_eq!(v(&[del(2)]), Err(Error::BadClass), "a page goes with its pager");
+        assert_eq!(v(&[del(1), create(1, 0, 0)]), Ok(()));
+        assert_eq!(freed_by_del(&t, 1).collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(v(&[value(1, 3)]), Ok(()));
+        assert_eq!(v(&[value(1, -1)]), Err(Error::BadValue));
+        assert_eq!(v(&[value(1, 193)]), Err(Error::BadValue));
+        assert_eq!(v(&[value(2, 0)]), Err(Error::BadClass));
+        assert_eq!(v(&[r(1, 4, &[10, 0, 0])]), Err(Error::BadValue), "no class 10");
     }
 
     #[test]

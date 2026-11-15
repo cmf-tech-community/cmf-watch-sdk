@@ -63,7 +63,7 @@ image** (no class descriptor derives from `lv_obj_class`; the class scan covers 
 | `lv_btnmatrix` | `0x101FB750` | 64 | `0x1013D738` | `set_map 0x1013D750`, `get_selected_btn 0x1013DE80`, ctrl setters `0x1013DAE8…0x1013DF34` | high |
 | `lv_chart` | `0x101FB308` | 180 | `0x10135518` | `set_type`, `set_point_count`, `set_range`, `add_series`, `set_next_value` … (script table) | high |
 | `lv_imgbtn` | `0x101FB328` | 120 | `0x10137A3C` | `set_src 0x10137BE4`, `set_state 0x10137CA8` | high |
-| `lv_tileview` / tile | `0x101FB348` / `0x101FB368` | 48 / 48 | `0x101380A0` / `add_tile 0x101380B8` | `lv_obj_set_tile_id 0x101380E8` | high (names medium) |
+| `lv_tileview` / tile | `0x101FB348` / `0x101FB368` | 48 / 48 | `0x101380A0` / `add_tile 0x101380B8` | `lv_obj_set_tile_id 0x101380E8`; `lv_obj_set_tile 0x101CB64A` (stores `tile_act` at tv+0x2C, `set_scroll_dir 0x101C6474` with the tile's dir at tile+0x2C, then `lv_obj_scroll_to 0x101C6650` = `scroll_to_x 0x1012B354` + `scroll_to_y 0x1012B380`); `get_tile_act 0x101CB680`. `add_tile(tv, col, row, dir)` stores the three in statics for the tile constructor. Scroll: `lv_obj_get_scroll_y 0x101C6514` (`-spec_attr->scroll.y`, spec_attr +0x14), `get_scroll_top 0x101C651E` (tail call to it), `get_scroll_dir 0x101C64DC`; `lv_obj_scroll_by 0x101C6598`. Used by the pager (`docs/abi-1.4.md`), emulator-proven | high (names medium) |
 | `lv_qrcode` | `0x101FB2A8` (base canvas) | — | `0x10134228` | `update 0x10134258` | high |
 | `lv_barcode` | (canvas) | — | `0x10133ECC` | `update 0x10133F80`, `delete 0x10134130` | high |
 

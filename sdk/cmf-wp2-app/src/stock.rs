@@ -201,4 +201,106 @@ pub fn arc(b: &mut Batch, obj: Obj, width: i32) -> Result<(), LvError> {
     Ok(())
 }
 
+/// Page dots: side of a dot, length of the current one, gap, distance from the right edge.
+pub const DOT: i32 = 10;
+pub const DOT_ON: i32 = 26;
+pub const DOT_GAP: i32 = 8;
+pub const DOT_X: i16 = -14;
+/// `Event.y` of a pager's page event (`LV_EVENT_VALUE_CHANGED`).
+pub const PAGE_CHANGED: i16 = 28;
+
+/// A vertical pager over the whole screen ([`Class::Pager`]) with `n` pages (at most `N`, the size of its arrays;
+/// the handles past `n` are `ROOT`) and page dots at the right edge: a
+/// white pill for the current page, grey dots for the others. Swipe up/down or turn the crown: one page per step;
+/// a page whose content is taller than the screen scrolls first and pages at its end. Feed every event to
+/// [`Pager::event`]. Build the pages' content into `pages` (plain objects, no padding, transparent). `del(root)`
+/// removes it all.
+#[derive(Clone, Copy)]
+pub struct Pager<const N: usize> {
+    /// Full screen, holds the pager and the dots.
+    pub root: Obj,
+    pub obj: Obj,
+    pub pages: [Obj; N],
+    pub dots: [Obj; N],
+    /// The page the dots show.
+    pub at: usize,
+    pub n: usize,
+}
+
+pub fn pager<const N: usize>(b: &mut Batch, n: usize) -> Result<Pager<N>, LvError> {
+    let n = n.min(N);
+    let root = b.create(Class::Obj, ROOT)?;
+    b.size(root, SCREEN, SCREEN)?;
+    for p in [Prop::PadTop, Prop::PadBottom, Prop::PadLeft, Prop::PadRight, Prop::BorderWidth, Prop::Radius, Prop::BgOpa] {
+        b.style(root, p, 0, 0)?;
+    }
+    b.flags(root, &[], &[Flag::Scrollable])?;
+    let obj = b.create(Class::Pager, root)?;
+    let mut pages = [ROOT; N];
+    for p in pages.iter_mut().take(n) {
+        *p = b.create(Class::Page, obj)?;
+    }
+    // after the pager, outside it: they stay put while the pages move; not clickable, so touches reach the pages
+    let col = b.create(Class::Obj, root)?;
+    b.size(col, CONTENT, CONTENT)?;
+    for p in [Prop::PadTop, Prop::PadBottom, Prop::PadLeft, Prop::PadRight, Prop::BorderWidth, Prop::BgOpa] {
+        b.style(col, p, 0, 0)?;
+    }
+    b.style(col, Prop::PadRow, 0, DOT_GAP)?;
+    b.flex(col, Flow::Column, FlexAlign::Center, FlexAlign::Center, FlexAlign::Center)?;
+    b.flags(col, &[], &[Flag::Clickable, Flag::Scrollable])?;
+    b.align(col, Align::RightMid, DOT_X, 0)?;
+    let mut dots = [ROOT; N];
+    for (i, d) in dots.iter_mut().enumerate().take(n) {
+        *d = b.create(Class::Obj, col)?;
+        b.style(*d, Prop::Radius, 0, CIRCLE)?;
+        b.style(*d, Prop::BgOpa, 0, 255)?;
+        b.style(*d, Prop::BorderWidth, 0, 0)?;
+        b.flags(*d, &[], &[Flag::Clickable, Flag::Scrollable])?;
+        dot(b, *d, i == 0)?;
+    }
+    Ok(Pager { root, obj, pages, dots, at: 0, n })
+}
+
+fn dot(b: &mut Batch, d: Obj, on: bool) -> Result<(), LvError> {
+    b.size(d, DOT, if on { DOT_ON } else { DOT })?;
+    b.style(d, Prop::BgColor, 0, if on { WHITE } else { LETTER_BG })
+}
+
+impl<const N: usize> Pager<N> {
+    /// The page this event says the pager settled on (the dots are not touched).
+    pub fn page(&self, e: &crate::Event) -> Option<usize> {
+        (e.kind == crate::LV && e.x as u16 == self.obj.0 && e.y == PAGE_CHANGED).then_some(e.delta as usize)
+    }
+
+    /// For every event: on a page change it moves the dots (submit `b` afterwards) and returns the page.
+    pub fn event(&mut self, b: &mut Batch, e: &crate::Event) -> Result<Option<usize>, LvError> {
+        let Some(i) = self.page(e) else { return Ok(None) };
+        self.show(b, i)?;
+        Ok(Some(i))
+    }
+
+    /// Moves the dots to page `i`.
+    pub fn show(&mut self, b: &mut Batch, i: usize) -> Result<(), LvError> {
+        if i >= self.n || i == self.at {
+            return Ok(());
+        }
+        dot(b, self.dots[self.at], false)?;
+        dot(b, self.dots[i], true)?;
+        self.at = i;
+        Ok(())
+    }
+
+    /// Glides to page `i`; the page event follows when it settles.
+    pub fn go(&self, b: &mut Batch, i: usize) -> Result<(), LvError> {
+        b.value(self.obj, i as i32, true)
+    }
+
+    /// Shows page `i` at once, dots included (to open a pager on a page other than the first).
+    pub fn jump(&mut self, b: &mut Batch, i: usize) -> Result<(), LvError> {
+        b.value(self.obj, i as i32, false)?;
+        self.show(b, i)
+    }
+}
+
 // ponytail: validated through lv-demo's host tests (they have wp2-core's validator), not here

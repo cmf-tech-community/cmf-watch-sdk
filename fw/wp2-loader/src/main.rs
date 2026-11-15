@@ -39,7 +39,7 @@ mod view {
     const SUSPEND: u32 = 0x82;
     const WAKE: u32 = 0x83;
     // a key this soon after WAKE is the one that woke the panel (AOD exit passes it on to the view)
-    const WAKE_KEY_MS: u32 = 500;
+    const WAKE_KEY_MS: u32 = 1500;
     const ERROR_MS: u32 = 2000;
 
     struct Menu {

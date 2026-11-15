@@ -315,8 +315,8 @@ have ~5 ms granularity (`next_event` in `fw/wp2-loader/src/app.rs`). Never spin 
   pauses it (`PAUSE`/`RESUME`). Proven in the emulator for light sleep (S1, `tests/test_back_e2e.py`
   `ScreenOffTest`); deep sleep (S2/S3BT) and AOD are not modelled there and are unverified on hardware.
 - **The press that ends AOD** reaches the view after the launcher's late-resume (`0x83`): the loader drops a key that
-  comes while asleep (`0x82`) or within 500 ms of `0x83`. An app on an older loader drops a `BUTTON` within 500 ms of
-  `RESUME` itself (workout does). The emulator does not model AOD: seen on hardware only.
+  comes while asleep (`0x82`) or within 1.5 s of `0x83` (500 ms let it through on hardware). An app on an older loader drops a `BUTTON` within 500 ms of
+  `RESUME` itself. The emulator does not model AOD: seen on hardware only.
 
 ### Time
 
@@ -715,7 +715,7 @@ repaints only the changed sector.
 
 Instead of drawing with `rect`, an app can build a screen from the watch's own LVGL 8.3 widgets, fonts and
 scrolling. Contract, records and budgets: `docs/abi-1.2.md`. Examples: `sdk/examples/ui-gallery` (every widget in
-the stock look: a stock focus list of sections with buttons, switches, gauges, a time picker and the stock fonts),
+the stock look: a stock focus list of sections with buttons, switches, gauges, a time picker, the stock fonts and a pager),
 `herdr-agents` (a live focus list) and `sdk/examples/lv-demo`
 (a crown-scrolled page with the title, a card with a slider driving an arc, a row per haptic pattern).
 
@@ -729,7 +729,41 @@ LVGL's small built-in one, a widget without styles is bare. `stock` gives:
 - the stock app list: `focus_page(b, icon)` and `focus_row` (FOCUS: the fisheye, the centred row CHECKED, `FOCUSED`
   events with its index), as herdr-agents uses them.
 - the stock Exercise list: `focus_page(b, FOCUS_CARDS)` and `focus_card` (cards that narrow away from the centre;
-  a loader from 2026-11-13 on, `docs/abi-1.4.md`), as workout uses them.
+  a loader from 2026-11-13 on, `docs/abi-1.4.md`).
+- a vertical pager: `pager::<N>(b, n)` (full-screen pages that snap, page dots at the right edge; a loader from
+  2026-11-14 on), below.
+
+### Pages (vertical pager)
+
+`stock::pager::<N>(&mut b, n)` builds the stock `lv_tileview` as a column of `n` (≤ `N`) full-screen pages with page dots on the
+right edge (a white pill for the current page, grey dots for the others). Swipe up/down or turn the crown: one page
+per step, and it snaps to a page. Example: ui-gallery's "Pages" section (`sdk/examples/ui-gallery/src/screens.rs`,
+`pages`); e2e `tests/test_pager_e2e.py`, frames `runs/pager/`.
+
+```rust
+let mut p = stock::pager::<3>(&mut b, 3)?;       // n pages of at most N; p.root (del it to remove all), p.obj, p.pages, p.dots
+b.flex(p.pages[0], Flow::Column, FlexAlign::Start, FlexAlign::Center, FlexAlign::Start)?;
+stock::title(&mut b, p.pages[0], "Today")?;     // build each page's content into p.pages[i]
+b.submit(&lv)?;
+// event loop: every event through the pager; it moves the dots and returns the page
+if let Some(i) = p.event(&mut b, &e)? { b.submit(&lv)?; /* page i is shown */ }
+p.go(&mut b, 2)?;                                // glide to a page; the page event follows
+p.jump(&mut b, 1)?;                              // show a page at once (open on it), dots too
+```
+
+- **A page taller than the screen scrolls first.** A drag scrolls the page's own content and the pager takes over at
+  its end (LVGL's scroll chain); the crown does the same: it scrolls the page by the stock crown step and, at the end,
+  the next step goes to the next page (the loader, `pager_crown`). Going back a page keeps that page's scroll.
+  No stock vertical pager was traced to copy this from; it is the rule that makes drag and crown agree.
+- **The pager takes the crown when it is created** (as a roller does): `knob(other)` moves it away, `knob(p.obj)`
+  brings it back. The app gets no `CROWN` events while the pager has it.
+- **The page event comes without `events`:** `Event { kind: LV, x: pager, y: 28 (VALUE_CHANGED), delta: page }` once
+  the pager settles on a page (after a swipe, a crown step or `go`), coalesced.
+- **The stock back swipe still works.** The pager only scrolls vertically, so a right swipe is still the stock "back"
+  (`BUTTON`, or the app's own back with `own_back`). `tests/test_pager_e2e.py` checks it over the pager.
+- Pages go with their pager: `del` refuses a page, and a pager holds pages only. Pages are plain, transparent
+  objects without padding. They get no round scroll bar.
+- A loader older than 2026-11-14 answers `-22` to the pager's `create`: install the loader first.
 
 Labels with a fixed size: `b.long_mode(label, LongMode::Dot)` keeps them on one line ending in "...".
 

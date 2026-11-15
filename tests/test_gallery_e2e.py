@@ -17,7 +17,7 @@ RUNNING = S + 6
 ELF = paths.ROOT / "sdk/target/thumbv7em-none-eabi/release/ui-gallery"
 OUT = paths.ROOT / "runs" / "gallery"
 RC, OPEN, OPENED, TICKS = range(4)  # STATS, main.rs
-SECTIONS = ["lists", "buttons", "switches", "gauges", "picker", "fonts"]
+SECTIONS = ["lists", "buttons", "switches", "gauges", "picker", "fonts", "pages"]
 
 
 @skipUnless(harness.E2E, "set WP2_E2E=1 (needs the emulator, netsimd, gdb and llvm-nm)")

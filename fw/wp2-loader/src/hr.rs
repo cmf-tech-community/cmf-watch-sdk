@@ -1,14 +1,17 @@
 // Heart rate for apps (docs/abi-1.4.md, "Heart rate"): the app's SENSOR request is a wish; the UI tick starts the
-// stock measurement while the app runs in the foreground and stops it on pause, exit, crash and force stop.
+// stock measurement while the app runs in the foreground, the panel dark (AOD) included, and stops it on pause, exit,
+// crash and force stop. The app thread hands out the readings: the UI tick does not run while the panel is dark. Start and stop as the stock heart view does them (docs/recon.md, "Heart rate").
 use crate::app::{millis, QUEUE};
 use core::ptr::addr_of_mut;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use wp2_core::heart::{self, Heart, SENSOR_HEART};
 use wp2_core::stock::{HR_BPM, HR_OWNER, HR_WEAR, PROP_HR_MODE, UX2SYS_SET};
 
 const E_INVAL: i32 = -22;
 
 static WANT: AtomicBool = AtomicBool::new(false);
+static ON: AtomicBool = AtomicBool::new(false);
+static EMIT_AT: AtomicU32 = AtomicU32::new(0);
 static mut HEART: Heart = Heart::new();
 
 fn byte(addr: u32) -> u8 {
@@ -37,10 +40,21 @@ pub fn tick(running: bool, paused: bool) {
         unsafe { (HR_BPM as *mut u8).write_volatile(0) };
         set_mode(1);
     }
+    ON.store(want, Ordering::Release);
     if s.stop {
         set_mode(0);
+        if running {
+            // no reading while it is off: the app must not keep the last one
+            QUEUE.coalesce(heart::event(byte(HR_WEAR), 0));
+        }
     }
-    if s.emit {
+}
+
+// app thread (next_event): a HEART event every EMIT_MS while it measures, lit or dark
+pub fn emit() {
+    let now = millis();
+    if ON.load(Ordering::Acquire) && now.wrapping_sub(EMIT_AT.load(Ordering::Relaxed)) >= heart::EMIT_MS {
+        EMIT_AT.store(now, Ordering::Relaxed);
         QUEUE.coalesce(heart::event(byte(HR_WEAR), byte(HR_BPM)));
     }
 }

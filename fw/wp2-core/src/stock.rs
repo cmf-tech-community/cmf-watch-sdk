@@ -115,6 +115,17 @@ pub const LV_OBJ_GET_CHILD: u32 = 0x1012C3DD;
 pub const LV_OBJ_GET_CHILD_CNT: u32 = 0x1012C4AD;
 pub const LV_OBJ_ADD_STATE: u32 = 0x10128245;
 pub const LV_OBJ_CLEAR_STATE: u32 = 0x10128311;
+// Pager (docs/recon-lvgl.md, "lv_tileview"; upstream 8.3 shapes read with thumb_dis): create(parent);
+// add_tile(tv, col u8, row u8, dir u8) stores col/row/dir for the tile constructor; set_tile_id(tv, col, row, anim);
+// get_tile_act(tv) reads tv+0x2C. Scroll: get_scroll_y = -spec_attr.scroll.y, get_scroll_bottom (`__func__`),
+// scroll_to_y(obj, y, anim) (the second call of lv_obj_scroll_to 0x101C6650, which lv_obj_set_tile ends in).
+pub const LV_TILEVIEW_CREATE: u32 = 0x101380A1;
+pub const LV_TILEVIEW_ADD_TILE: u32 = 0x101380B9;
+pub const LV_OBJ_SET_TILE_ID: u32 = 0x101380E9;
+pub const LV_TILEVIEW_GET_TILE_ACT: u32 = 0x101CB681;
+pub const LV_OBJ_GET_SCROLL_Y: u32 = 0x101C6515;
+pub const LV_OBJ_GET_SCROLL_BOTTOM: u32 = 0x1012AE09;
+pub const LV_OBJ_SCROLL_TO_Y: u32 = 0x1012B381;
 // Ids of the 48 stock lv_obj_set_style_* setters (44 tail-call set_local_style_prop with `movs r1, #id`,
 // 0x101C72CC..0x101C751A; the 4 flex setters load ids that lv_flex_init registers at boot: flow 113, main_place
 // 114, cross_place 115, track_place 116, read in the emulator). 45, 92, 93 are Actions additions. Sorted.
