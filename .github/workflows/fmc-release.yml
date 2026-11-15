@@ -48,6 +48,7 @@ jobs:
           rustup target add thumbv7em-none-eabi
           rustup component add llvm-tools
           echo "$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin" >> "$GITHUB_PATH"
+          cargo install resvg --locked  # app icons in test_sdk; not in Ubuntu 24.04
       - name: Tests
         env:
           CMF_WATCH_UTILS: ${{ github.workspace }}/cmf-watch-utils

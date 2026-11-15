@@ -18,7 +18,8 @@ class SdkTest(unittest.TestCase):
                 pkg = package.parse((ROOT / "target" / f"{name}.wp2app").read_bytes())
                 lab = name == "vibration-lab"  # has icon.svg: the descriptor sits in front of the code
                 self.assertEqual((pkg.name, icon.parse(pkg.image) is not None), (name, lab))
-                self.assertEqual(pkg.entry, icon.DESC.size + icon.SIDE ** 2 * 3 if lab else 0)
+                self.assertTrue(package.features(pkg.image))  # both declare app_features!: 8 bytes after the icon
+                self.assertEqual(pkg.entry, (icon.DESC.size + icon.SIDE ** 2 * 3 if lab else 0) + 8)
                 self.assertTrue(pkg.relocs)
                 for off in pkg.relocs:
                     self.assertLess(struct.unpack_from("<I", pkg.image, off)[0] & ~1, len(pkg.image))
