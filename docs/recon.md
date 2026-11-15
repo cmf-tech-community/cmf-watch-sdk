@@ -606,7 +606,20 @@ clears it. The app writes the record with an `lv_submit` WIDGET record (op `0x14
 `Api::widget`); the loader writes the file on the app thread. App removal (BLE `DELETE`, the menu's long press,
 another app installed into the slot) unlinks it. Stub size: `0x2B5F` → `0x2DB3` bytes; with the view table `0x3D00` of `0x4000`.
 
-Still open: a `cards set` while the card is on screen; the package icon on the tile (the stub has no room for an
+### App pages and the Apps menu (2026-11-15, stub version 5)
+
+| Item | Finding | Confidence |
+|---|---|---|
+| View card with our view | `cards set view:0xF0` makes the loader view a page left of the face: the pager lays it out with the face (PRELOAD + LAYOUT before any swipe), swipes in and out give `focus`/`defocus` + `resume`/`pause draw`, no fault. Frames `runs/app-widgets/view-*.png` (not committed) | high (emulator) |
+| Free view ids | the stock view table ends at id 237; `0xF1`…`0xFF` are unused. `wp2apps firmware` adds `0xF8`…`0xFF` (the same proc as `0xF0`, 8 × 24 B) | high (static) |
+| App page | view `0xF8 + slot`: the loader starts that app at LAYOUT (`cards.rs page_slot`) when its package declares a page. DEFOCUS pauses it (`APP_PAUSED`), FOCUS resumes or restarts it. A widget tap (`jump 208 -> 240`) PRELOADs `0xF0` while the page still exists: the stub hands the loader to the new view (`StubRam.loader_view`) and ignores the old view's later DELETE. The next face layout creates the page again and it starts the app again | high (emulator, `tests/test_app_pages_e2e.py`) |
+| Card list store | the 0x906D set copies its 98 B to `0x38007880` and calls `0x100E05EC(0xE4, 0)`. The loader does the same from the Apps menu: the store changes at once, the pager uses it from its next layout (CardList re-reads property 0x2F into `0x38045CA0` then) | high (emulator) |
+| Declarations | `app_features!` puts `"WP2F", flags, 0, 0, 0` into `.wp2info` after the icon (offset 0 without one); the menu's scan reads it after the icon. Not in the package header: its reserved bytes must be 0 for every stub so far | high |
+
+Still open: two app pages, or `view:0xF0` and an app page on one list, each PRELOAD takes the loader from the other
+and leaves the other page blank (the menu allows one page; `cards set` does not check); what the stock does with the
+crown press on a page (the loader leaves it to the stock); an app page's memory while the face shows (its block stays
+allocated); a `cards set` while the card is on screen; the package icon on the tile (the stub has no room for an
 icon reader; the tile is text only); `param_id` of the stock families; byte `0x61`.
 
 Not proven in the first pass (no emulator on that machine) and settled by the emulator results above: the widget
