@@ -941,6 +941,11 @@ screen builder (`src/screen.rs`) is host-tested: each batch validates against th
   itself). **A roller takes the crown when it is created**: send `knob(...)` after creating it. A plain `obj` is
   scrollable by default: clear `Flag::Scrollable` before `knob(panel)` if you want `CROWN` events from it.
 - **A rightward drag across a slider is the stock back gesture** (`BUTTON`). Test sliders with leftward drags.
+- **Rollers: keep them short and not infinite, mostly with `F48M` on the selected row.** Every frame of a scroll,
+  LVGL measures every row with the selected row's font, and infinite mode repeats the rows 7 times. The stock
+  firmware gives `font48M` a 6-glyph cache (the 10 KiB default, it has no stock preset; `font32M` holds 73 glyphs).
+  The digits of a time picker therefore miss it on every row, and each miss is a NAND read plus an RLE unpack. The
+  ui-gallery picker (24 + 60 rows) drew at 4-6 fps while scrolling in infinite mode and at 22-38 fps in normal mode.
 - **Budgets.** 192 objects, 4 fonts, 128 B text, 240 B roller options, 2048 B per batch. A bad batch returns `-22` or
   `-12` and changes nothing; the SDK's handle table is then out of step, so treat it as a bug.
 - **Lifetime.** Exit, crash, force stop and view delete delete the root, every object and the fonts. An app has

@@ -305,7 +305,11 @@ pub fn section(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), L
             for (k, (o, v)) in [(&hours[..71], 7), (&minutes[..179], 30)].into_iter().enumerate() {
                 room(b, flush)?;
                 let r = b.create(Class::Roller, card)?;
-                b.options(r, core::str::from_utf8(o).unwrap_or("00"), true)?;
+                // not infinite: every frame LVGL measures all rows with the selected row's font, and infinite mode
+                // repeats the rows 7 times (420 for minutes). font48M has a 6-glyph cache in the stock firmware, so
+                // the digits miss it on every row: a NAND read and an RLE unpack each. Infinite drew at 4-6 fps in
+                // the emulator, this draws at 22-38 (docs/app-guide.md, LVGL)
+                b.options(r, core::str::from_utf8(o).unwrap_or("00"), false)?;
                 b.size(r, 120, 250)?;
                 b.align(r, Align::Center, if k == 0 { -70 } else { 70 }, 0)?;
                 b.value(r, v, false)?;
