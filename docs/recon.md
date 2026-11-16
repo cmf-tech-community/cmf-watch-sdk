@@ -449,6 +449,22 @@ Ghidra and capstone on the launcher's message handler (`0x1005DE00…0x1005E290`
 | Not modelled | deep sleep (S2/S3BT) stops the emulator ("Guest hit a fatal or unsupported path"); forcing the AOD branch (`r4 = 1` at `0x1005E120`) does too. Both need a hardware check | — |
 | Earlier note | "the stock closes the app view on auto-sleep" (`docs/herdr-agents.md`, `docs/app-guide.md`, 2026-11-11) came from emulator runs; no stock path that deletes view 240 on blank was found | medium |
 
+## Music tile (sport1_view)
+
+Ghidra on `0x10076F00..0x1007A400` (`sport1_view`, id `0x64`, desc `0x101ED554`: data `0x504` B, scene
+`0x6880AE34`, layout `0x10079148`, paint `0x10078B2C`, preload `0x10078044`).
+
+| Item | Value | Confidence |
+|---|---|---|
+| Tiles | `lv_tileview` with tiles (0,0) dir 2, (1,0) dir 3, (2,0) dir 1; it opens on (1,0). Music is (2,0) | high |
+| Scene resources | `SCENE_OPEN 0x10184804(scene id, &{id, node, res}, "/NAND:A/bt_watch.sty" 0x10203EA6, "/NAND:A/bt_watch.res" 0x10203E91, lang 0x100DFB88())` (refcounted, as popups open theirs); close `0x101D7714(&scene)`; images `0x101848D4(&scene, ids, lv_img_dsc_t[n], 0, n)`, free `0x101D775A(dsc, n)`; texts `0x10184A5C(&scene, ids, {char *, u32}[n], n)`, free `0x101D777A(texts, n)` | high (emulator) |
+| Ids | 22 images at `0x101ED460` (6 pause, 7 previous, 8 next, 9 volume, 10 play, 12 grey play), 3 page dots at `0x101ED4F0`, 22 texts at `0x101ED4FC` (14 "No music") | high (emulator) |
+| Objects | `simple_img` (`0x1005A014`/`0x1005A02C`) play `TOP_MID 0,173`; previous `align_to(play, OUT_LEFT_MID, -32, 0)`; next `OUT_RIGHT_MID, 32, 0`; volume `BOTTOM_MID 0,-44`, all clickable; labels 266 px × one line, `SCROLL_CIRCULAR`, title `TOP_MID 0,44` sans32 anim speed 20, artist `align_to(title, OUT_BOTTOM_MID, 0, 12)` sans32 colour `0x9492`, "No music" `TOP_MID 0,44` font32M; page dots image `TOP_MID 0,440` | high |
+| Fonts | opened by `0x100DF9A0(lv_font_t *, path)`: `lvgl_bitmap_font_open` plus per file: font32M and font28M line height +6, font32R and font24M +4, `/NAND:C/sans32.font` gets the emoji28 fallback; `LVGL_BITMAP_FONT_CLOSE` frees the fallback | high |
+| Paint (`0x101AF03C`) | `0x4C` set: title/artist from `0x4F`, play image pause (`0x4D` set) or play, "No music" hidden; else title/artist hidden, "No music" shown, grey play | high |
+| Taps | previous/next send `0x4E` 3/4, play `0x4E` 1 or 2 by its own flag, only with `0x31` and `0x4C` set; else a "connect the phone" popup; volume opens a volume popup (`0x50`) | high (static) |
+| Centred text | the labels draw centred, inherited (no `text_align` on them); the loader sets it on its container | high (emulator) |
+
 ## Return to watch face
 
 Capstone on `0x1005D968`, `0x100C27CC…0x100C28D0`, the launcher message handler (`0x1005DEDE`, `0x1005E128`,

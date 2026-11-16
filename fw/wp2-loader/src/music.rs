@@ -1,0 +1,266 @@
+// The stock workout screen's music tile as Class::Music (docs/abi-1.4.md, "Music tile"): built with the calls of
+// sport1_view's third tile (layout 0x10079148), with its images and "No music" from its scene and its fonts through
+// the stock font open, filled from the phone once a second as its paint (0x101AF03C) does. Taps send the media keys
+// here; the app gets them as LV CLICKED events. UI thread only.
+use crate::{app, media};
+use core::ffi::c_void;
+use core::ptr::{addr_of_mut, null_mut};
+use wp2_core::events::{Event, LV};
+use wp2_core::lvcmd::*;
+use wp2_core::stock::*;
+
+type Obj = *mut c_void;
+
+const E_IO: i32 = -5;
+const CLICKED: u32 = 7;
+const HIDDEN: u32 = 1;
+const CLICKABLE: u32 = 2;
+const SCROLLABLE: u32 = 1 << 4;
+// LV_ALIGN_*
+const TOP_MID: u32 = 2;
+const BOTTOM_MID: u32 = 5;
+const OUT_BOTTOM_MID: u32 = 0x0E;
+const OUT_LEFT_MID: u32 = 0x11;
+const OUT_RIGHT_MID: u32 = 0x14;
+const SCROLL_CIRCULAR: u32 = 3;
+const TEXT_ALIGN_CENTER: u32 = 2;
+const LABEL_W: i32 = 266;
+const ARTIST_COLOR: u32 = 0x9492;
+const SCROLL_SPEED: u32 = 20;
+const POLL_MS: u32 = 1000;
+const SANS: usize = 0;
+const F32M: usize = 1;
+
+struct Music {
+    // the tile's handle, 0 = none
+    h: u16,
+    // the scene struct {id, node, res}
+    scene: [u32; 3],
+    imgs: [[u32; 3]; MUSIC_IMGS],
+    // {char *, u32}
+    text: [u32; 2],
+    fonts: [[u32; 8]; 2],
+    fonts_open: u8,
+    title: Obj,
+    artist: Obj,
+    none: Obj,
+    play: Obj,
+    playing: bool,
+    // (available, playing) applied, None: apply the next one
+    last: Option<(bool, bool)>,
+    info: [u8; 0x82],
+    polled_at: u32,
+}
+
+static mut M: Music = Music {
+    h: 0,
+    scene: [0; 3],
+    imgs: [[0; 3]; MUSIC_IMGS],
+    text: [0; 2],
+    fonts: [[0; 8]; 2],
+    fonts_open: 0,
+    title: null_mut(),
+    artist: null_mut(),
+    none: null_mut(),
+    play: null_mut(),
+    playing: false,
+    last: None,
+    info: [0; 0x82],
+    polled_at: 0,
+};
+
+fn m() -> &'static mut Music {
+    unsafe { &mut *addr_of_mut!(M) }
+}
+
+fn style(obj: Obj, prop: u32, value: u32) {
+    stock!(LV_OBJ_SET_LOCAL_STYLE_PROP, fn(Obj, u32, u32, u32))(obj, prop, value, 0)
+}
+
+fn flag(obj: Obj, f: u32, on: bool) {
+    stock!(if on { LV_OBJ_ADD_FLAG } else { LV_OBJ_CLEAR_FLAG }, fn(Obj, u32))(obj, f);
+}
+
+fn img(parent: Obj, i: usize) -> Obj {
+    let o = stock!(SIMPLE_IMG_CREATE, fn(Obj) -> Obj)(parent);
+    stock!(SIMPLE_IMG_SET_SRC, fn(Obj, *const u32))(o, m().imgs[i].as_ptr());
+    o
+}
+
+fn button(o: Obj, b: i16) {
+    flag(o, CLICKABLE, true);
+    stock!(LV_OBJ_ADD_EVENT_CB, fn(Obj, extern "C" fn(*mut c_void), u32, usize) -> *mut c_void)(o, on_click, CLICKED, b as usize);
+}
+
+// a one-line label of the stock tile: 266 px wide, one line of its font high, scrolling round
+fn label(parent: Obj, font: usize) -> Obj {
+    let s = m();
+    let o = stock!(LV_LABEL_CREATE, fn(Obj) -> Obj)(parent);
+    stock!(LV_OBJ_SET_SIZE, fn(Obj, i32, i32))(o, LABEL_W, s.fonts[font][2] as i32);
+    style(o, LV_STYLE_TEXT_FONT, s.fonts[font].as_ptr() as u32);
+    stock!(LV_LABEL_SET_LONG_MODE, fn(Obj, u32))(o, SCROLL_CIRCULAR);
+    o
+}
+
+/// CREATE of a Music handle (validated: none lives). The container fills its parent's 466 × 466 like the stock tile.
+pub fn create(parent: Obj, h: u16) -> Result<Obj, i32> {
+    let s = m();
+    let lang = stock!(SCENE_LANG, fn() -> u32)();
+    if stock!(SCENE_OPEN, fn(u32, *mut u32, u32, u32, u32) -> i32)(SPORT1_SCENE, s.scene.as_mut_ptr(), SCENE_STY, SCENE_RES, lang) < 0 {
+        s.scene = [0; 3];
+        return Err(E_IO);
+    }
+    let ids = SPORT1_IMGS + 4 * MUSIC_IMG_FIRST as u32;
+    let imgs = stock!(SCENE_IMGS, fn(*mut u32, u32, *mut u32, u32, u32) -> i32);
+    if imgs(s.scene.as_mut_ptr(), ids, s.imgs.as_mut_ptr().cast(), 0, MUSIC_IMGS as u32) < 0 {
+        stock!(SCENE_CLOSE, fn(*mut u32))(s.scene.as_mut_ptr());
+        return Err(E_IO);
+    }
+    let texts = stock!(SCENE_TEXTS, fn(*mut u32, u32, *mut u32, u32) -> i32);
+    if texts(s.scene.as_mut_ptr(), SPORT1_TEXTS + 4 * TEXT_NO_MUSIC as u32, s.text.as_mut_ptr(), 1) < 0 {
+        s.text = [0; 2];
+    }
+    for (i, path) in [FONT_SANS32, FONT_32M].into_iter().enumerate() {
+        if stock!(FONT_OPEN_STOCK, fn(*mut u32, u32) -> i32)(s.fonts[i].as_mut_ptr(), path) == 0 {
+            s.fonts_open |= 1 << i;
+        } else {
+            s.fonts[i] = unsafe { (LV_FONT_DEFAULT as *const [u32; 8]).read() };
+        }
+    }
+    s.h = h;
+    let c = stock!(LV_OBJ_CREATE, fn(Obj) -> Obj)(parent);
+    stock!(LV_OBJ_SET_SIZE, fn(Obj, i32, i32))(c, 466, 466);
+    flag(c, SCROLLABLE | CLICKABLE, false);
+    // the stock labels inherit centred text (emulator frame: "No music" at x 164..301)
+    style(c, LV_STYLE_TEXT_ALIGN, TEXT_ALIGN_CENTER);
+    // the stock order: play, previous, next, volume, title, artist, "No music"
+    s.play = img(c, IMG_PLAY_OFF);
+    stock!(LV_OBJ_ALIGN, fn(Obj, u32, i32, i32))(s.play, TOP_MID, 0, 173);
+    button(s.play, MUSIC_PLAY);
+    let align_to = stock!(LV_OBJ_ALIGN_TO, fn(Obj, Obj, u32, i32, i32));
+    let prev = img(c, IMG_PREV);
+    align_to(prev, s.play, OUT_LEFT_MID, -32, 0);
+    button(prev, MUSIC_PREV);
+    let next = img(c, IMG_NEXT);
+    align_to(next, s.play, OUT_RIGHT_MID, 32, 0);
+    button(next, MUSIC_NEXT);
+    let vol = img(c, IMG_VOLUME);
+    stock!(LV_OBJ_ALIGN, fn(Obj, u32, i32, i32))(vol, BOTTOM_MID, 0, -44);
+    button(vol, MUSIC_VOLUME);
+    s.title = label(c, SANS);
+    stock!(LV_OBJ_ALIGN, fn(Obj, u32, i32, i32))(s.title, TOP_MID, 0, 44);
+    style(s.title, LV_STYLE_ANIM_SPEED, SCROLL_SPEED);
+    s.artist = label(c, SANS);
+    style(s.artist, LV_STYLE_TEXT_COLOR, ARTIST_COLOR);
+    align_to(s.artist, s.title, OUT_BOTTOM_MID, 0, 12);
+    style(s.artist, LV_STYLE_ANIM_SPEED, SCROLL_SPEED);
+    s.none = label(c, F32M);
+    if s.text[0] != 0 {
+        stock!(LV_LABEL_SET_TEXT, fn(Obj, *const u8))(s.none, s.text[0] as *const u8);
+    }
+    stock!(LV_OBJ_ALIGN, fn(Obj, u32, i32, i32))(s.none, TOP_MID, 0, 44);
+    (s.last, s.info, s.polled_at) = (None, [0; 0x82], app::millis());
+    refresh();
+    Ok(c)
+}
+
+fn set_icon(i: usize) {
+    stock!(SIMPLE_IMG_SET_SRC, fn(Obj, *const u32))(m().play, m().imgs[i].as_ptr());
+}
+
+/// VALUE of the Music handle: the play button shows pause (1) or play (0) until the phone's state changes.
+pub fn set_playing(on: bool) {
+    m().playing = on;
+    set_icon(music_icon(true, on));
+}
+
+fn set_text(obj: Obj, text: &[u8]) {
+    let mut z = [0u8; 0x41];
+    z[..text.len()].copy_from_slice(text);
+    stock!(LV_LABEL_SET_TEXT, fn(Obj, *const u8))(obj, z.as_ptr());
+}
+
+// the stock paint: title and artist with phone media, else "No music"; the play button by the state
+fn refresh() {
+    let s = m();
+    let state = (media::available(), media::playing());
+    if s.last != Some(state) {
+        s.last = Some(state);
+        s.playing = state.1;
+        set_icon(music_icon(state.0, state.1));
+        for o in [s.title, s.artist] {
+            flag(o, HIDDEN, !state.0);
+        }
+        flag(s.none, HIDDEN, state.0);
+    }
+    if !state.0 {
+        return;
+    }
+    let info = media::info();
+    if info == &s.info {
+        return;
+    }
+    s.info.copy_from_slice(info);
+    let (title, artist) = media_info(&s.info);
+    set_text(s.title, title);
+    set_text(s.artist, artist);
+}
+
+/// UI tick.
+pub fn tick() {
+    let s = m();
+    if s.h == 0 || !app::running() || app::paused() || app::millis().wrapping_sub(s.polled_at) < POLL_MS {
+        return;
+    }
+    s.polled_at = app::millis();
+    refresh();
+}
+
+// user_data = the button
+extern "C" fn on_click(e: *mut c_void) {
+    let b = stock!(LV_EVENT_GET_USER_DATA, fn(*mut c_void) -> usize)(e) as i16;
+    let s = m();
+    if s.h == 0 || !app::running() || app::paused() {
+        return;
+    }
+    // as the stock tile: the keys only with phone media (its "connect the phone" popup is left out)
+    let cmd = match b {
+        MUSIC_PLAY if s.playing => MEDIA_PAUSE,
+        MUSIC_PLAY => MEDIA_PLAY,
+        MUSIC_PREV => MEDIA_PREV,
+        MUSIC_NEXT => MEDIA_NEXT,
+        _ => 0,
+    };
+    if cmd != 0 && media::available() {
+        media::send(cmd);
+        if b == MUSIC_PLAY {
+            set_playing(!s.playing);
+        }
+    }
+    app::QUEUE.push(Event { kind: LV, x: s.h as i16, y: CLICKED as i16, delta: b, ..Event::default() });
+}
+
+/// After its objects are gone (DEL of the tile or of an ancestor, teardown): frees its images, text, fonts, scene.
+pub fn free() {
+    let s = m();
+    if s.h == 0 {
+        return;
+    }
+    for i in 0..2 {
+        if s.fonts_open >> i & 1 != 0 {
+            stock!(LVGL_BITMAP_FONT_CLOSE, fn(*mut u32))(s.fonts[i].as_mut_ptr());
+        }
+    }
+    if s.text[0] != 0 {
+        stock!(SCENE_TEXTS_FREE, fn(*mut u32, u32))(s.text.as_mut_ptr(), 1);
+    }
+    stock!(SCENE_IMGS_FREE, fn(*mut u32, u32))(s.imgs.as_mut_ptr().cast(), MUSIC_IMGS as u32);
+    stock!(SCENE_CLOSE, fn(*mut u32))(s.scene.as_mut_ptr());
+    (s.h, s.fonts_open, s.text, s.last) = (0, 0, [0; 2], None);
+    (s.title, s.artist, s.none, s.play) = (null_mut(), null_mut(), null_mut(), null_mut());
+}
+
+/// Handle of the live tile, 0 = none.
+pub fn handle() -> u16 {
+    m().h
+}

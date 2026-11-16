@@ -55,6 +55,10 @@ pub enum Class {
     /// back swipe pages instead of giving BUTTON; the crown press still gives BUTTON. Loader of 2026-11-16; an older
     /// one answers -22. Use [`crate::stock::hpager`].
     PagerH = 10,
+    /// The stock workout screen's music tile (`sport1_view`): track title and artist (or "No music"), previous /
+    /// play-pause / next and volume, with the stock images and fonts, 466 × 466. The loader fills it from the phone
+    /// and sends the keys itself; one at a time. Use [`crate::stock::music`]. Loader of 2026-11-16 (older: `-22`).
+    Music = 11,
 }
 
 /// `lv_align_t`.

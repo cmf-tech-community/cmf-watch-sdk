@@ -2,7 +2,8 @@
 //! buttons, switches, gauges, a time picker, the stock fonts, the label long modes); a section opens on a tap and goes
 //! back with its title or "Back". The crown scrolls. "Pages" is the vertical pager (`stock::pager`), "Cards" the
 //! stock Exercise list (`FOCUS_CARDS`), "Swipe" the horizontal pager (`stock::hpager`). Host messages for tests/test_gallery_e2e.py: `!open N`, `!menu`;
-//! for tests/test_pager_e2e.py `!hpager` (the horizontal pager with music labels), `!key N` (media_key).
+//! for tests/test_pager_e2e.py `!hpager` (the horizontal pager with music labels), `!key N` (media_key); for
+//! tests/test_music_e2e.py `!music` (the stock music tile).
 #![cfg_attr(target_os = "none", no_std, no_main)]
 
 #[cfg_attr(not(target_os = "none"), allow(dead_code))]
@@ -37,9 +38,11 @@ mod device {
     const KEY: usize = 8;
     // the menu's centred row (last FOCUSED), -1 before the first
     const FOCUS: usize = 9;
+    // !music: the last music tile button tapped
+    const MUSIC: usize = 10;
     // non-zero: in .data, fresh at every launch; RC 1 until the menu is built
     #[unsafe(no_mangle)]
-    static mut STATS: [i32; 10] = [1, 0, 0, 0, 0, -1, 0, -1, 1, -1];
+    static mut STATS: [i32; 11] = [1, 0, 0, 0, 0, -1, 0, -1, 1, -1, -1];
 
     fn set(i: usize, v: i32) {
         unsafe { (&raw mut STATS[i]).write_volatile(v) }
@@ -75,7 +78,7 @@ mod device {
         // a screen to switch to after the events of this turn: None stays, Some(None) the menu, Some(Some(i))
         let mut go: Option<Option<usize>>;
         let mut msg = [0u8; MSG_MAX];
-        let mut hp = false;
+        let (mut hp, mut mu) = (false, false);
         loop {
             go = None;
             motor.update();
@@ -86,6 +89,9 @@ mod device {
                 MEDIA => {
                     set(MEDIAS, get(MEDIAS) + 1);
                     set(MEDIA_STATE, i32::from(e.x) | i32::from(e.y) << 1);
+                }
+                LV if s.music.is_some_and(|m| m.event(&e).is_some()) => {
+                    set(MUSIC, s.music.and_then(|m| m.event(&e)).unwrap_or(-1).into());
                 }
                 LV if s.hpager.is_some_and(|p| p.obj.0 == e.x as u16) => {
                     if let Some(i) = s.hpager.as_mut().and_then(|p| p.event(&e)) {
@@ -139,6 +145,7 @@ mod device {
                         match m {
                             b"!menu" => go = Some(None),
                             b"!hpager" => hp = true,
+                            b"!music" => mu = true,
                             [b'!', b'k', b'e', b'y', b' ', d] => set(KEY, api.media_key(d.wrapping_sub(b'0'))),
                             [b'!', b'o', b'p', b'e', b'n', b' ', d] if (*d as usize) >= b'0' as usize
                                 && ((*d - b'0') as usize) < N => go = Some(Some((*d - b'0') as usize)),
@@ -147,6 +154,16 @@ mod device {
                     }
                 }
                 _ => {}
+            }
+            if core::mem::take(&mut mu) {
+                match screens::leave(&mut b, &s).and_then(|_| screens::music(&mut b)) {
+                    Ok(next) => {
+                        s = next;
+                        set(RC, code(b.submit(&lv)));
+                        set(PAGE, 2);
+                    }
+                    Err(e) => set(RC, code(Err(e))),
+                }
             }
             if core::mem::take(&mut hp) {
                 match screens::leave(&mut b, &s).and_then(|_| screens::hpages(&mut b, false)) {

@@ -15,7 +15,7 @@ S = harness.STUB_RAM
 RUNNING = S + 6
 ELF = paths.ROOT / "sdk/target/thumbv7em-none-eabi/release/ui-gallery"
 OUT = paths.ROOT / "runs" / "pager"
-RC, OPEN, OPENED, TICKS, PAGE, BIND, MEDIAS, MEDIA_STATE, KEY = range(9)  # STATS, ui-gallery main.rs
+RC, OPEN, OPENED, TICKS, PAGE, BIND, MEDIAS, MEDIA_STATE, KEY, FOCUS, MUSIC = range(11)  # STATS, ui-gallery main.rs
 PAGES = 6  # screens::PAGES
 NEXT, PREV = "r -80", "r 80"  # crown: down the content / up
 
@@ -35,7 +35,7 @@ class PagerTest(unittest.TestCase):
 
             def stats():
                 at = harness.u32(emu, S + harness.APP_BLOCK_OFF) + harness.symbol(ELF, "STATS")
-                return struct.unpack("<9i", emu.peek(at, 36))
+                return struct.unpack("<11i", emu.peek(at, 44))
 
             def frame(name):
                 w, h, rgb = emu.frame()
@@ -132,7 +132,7 @@ class PagerTest(unittest.TestCase):
 
             def stats():
                 at = harness.u32(emu, S + harness.APP_BLOCK_OFF) + harness.symbol(ELF, "STATS")
-                return struct.unpack("<9i", emu.peek(at, 36))
+                return struct.unpack("<11i", emu.peek(at, 44))
 
             emu.sleep(1)
             asyncio.run(send(b"!hpager"))

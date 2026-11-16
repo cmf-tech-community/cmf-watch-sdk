@@ -841,6 +841,12 @@ with the app (CROWN events). While a horizontal pager lives the right swipe page
 the app leaves with the crown press. Loader of 2026-11-16 (`docs/abi-1.4.md`, "Horizontal pager"); an older loader
 answers `-22` at `create`. ui-gallery's `!hpager` is the example.
 
+`stock::music(&mut b, page)` puts the stock workout screen's music page into a page: "No music" or the phone's
+track, previous / play-pause / next and volume, with the stock images and fonts. The loader fills it and sends the
+keys; `Music::event(&e)` tells the app which button was tapped, `Music::playing(&mut b, on)` sets the play button
+until the phone's state changes. One at a time; an older loader answers `-22`. ui-gallery's `!music` is the
+example (`docs/abi-1.4.md`, "Music tile").
+
 ### Stock components: SDK and ui-gallery
 
 What the stock apps are built from (`docs/recon-lvgl.md`, "Widget classes present" and "Vendor components"; the
@@ -867,6 +873,7 @@ ui-gallery shows it. "Composed": no stock widget, built from `Obj`/`Btn`/`Slider
 | Vertical pager with page dots (`lv_tileview`) | `stock::pager` | Pages |
 | Horizontal pager, the workout screen | `stock::hpager` | Swipe; `!hpager` with music labels |
 | Phone music labels | `Api::media_bind` | `!hpager` (tests/test_pager_e2e.py) |
+| Workout music page (sport1_view tile) | `stock::music` (`Class::Music`) | `!music` (tests/test_music_e2e.py) |
 | Tap haptic | `cmf_wp2_ui::haptic::TICK` | rows, buttons, switches |
 | Images and icons (`lv_img`, vendor `simple_img`, `lv_imgbtn`) | no (no image source in the LVGL records) | no |
 | Frame animation (`jx_pic_anim`) | no | no |

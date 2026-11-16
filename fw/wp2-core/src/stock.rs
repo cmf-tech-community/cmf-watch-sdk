@@ -197,3 +197,31 @@ pub const HR_BPM: u32 = 0x3804_B310;
 // RETURN_CLOCK at launch; late-resume calls it when the panel was dark for ux2sys 0x9C seconds, unless it is 0.
 pub const RETURN_CB: u32 = 0x3801_9B10;
 pub const RETURN_CLOCK: u32 = 0x1005_D969;
+// The stock workout screen's music tile (sport1_view 0x64, its third tile; docs/recon.md, "Music tile"). Scene
+// resources: SCENE_OPEN(scene id, &Scene {id, node, res}, sty path, res path, language path) opens a scene of
+// bt_watch.res (refcounted); SCENE_IMGS(&scene, ids, out lv_img_dsc_t[n], 0, n) / SCENE_TEXTS(&scene, ids,
+// out {char *, u32}[n], n) load n resources by hash id; the _FREE calls (out, n) and SCENE_CLOSE(&scene) undo them.
+pub const SCENE_OPEN: u32 = 0x1018_4805;
+pub const SCENE_CLOSE: u32 = 0x101D_7715;
+pub const SCENE_IMGS: u32 = 0x1018_48D5;
+pub const SCENE_IMGS_FREE: u32 = 0x101D_775B;
+pub const SCENE_TEXTS: u32 = 0x1018_4A5D;
+pub const SCENE_TEXTS_FREE: u32 = 0x101D_777B;
+// () -> the language file path (/NAND:A/bt_watch.<lang>)
+pub const SCENE_LANG: u32 = 0x100D_FB89;
+pub const SCENE_RES: u32 = 0x1020_3E91;
+pub const SCENE_STY: u32 = 0x1020_3EA6;
+pub const SPORT1_SCENE: u32 = 0x6880_AE34;
+// sport1_view's 22 image ids (its preload 0x10078044) and its texts' ids
+pub const SPORT1_IMGS: u32 = 0x101E_D460;
+pub const SPORT1_TEXTS: u32 = 0x101E_D4FC;
+// (lv_font_t *, path): the stock font open with its per-file tweaks: font32M +6 line height, sans32 gets the emoji
+// fallback (0x100DF9A0). LVGL_BITMAP_FONT_CLOSE frees the fallback too.
+pub const FONT_OPEN_STOCK: u32 = 0x100D_F9A1;
+pub const FONT_SANS32: u32 = 0x1020_1DEE;
+pub const FONT_32M: u32 = 0x1020_1DC4;
+// vendor simple_img (create, set_src with an lv_img_dsc_t), as the stock tiles draw their icons
+pub const SIMPLE_IMG_CREATE: u32 = 0x1005_A015;
+pub const SIMPLE_IMG_SET_SRC: u32 = 0x1005_A02D;
+pub const LV_OBJ_ALIGN_TO: u32 = 0x1012_A87D;
+pub const LV_STYLE_ANIM_SPEED: u32 = 0x66;

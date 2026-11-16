@@ -55,6 +55,8 @@ pub struct Screen {
     pub hpager: Option<stock::HPager<3>>,
     /// `!hpager`: the labels the loader writes the phone's track into
     pub media: [Obj; 2],
+    /// `!music`: the stock music tile
+    pub music: Option<stock::Music>,
 }
 
 const EMPTY: Screen = Screen {
@@ -75,6 +77,7 @@ const EMPTY: Screen = Screen {
     pager: None,
     hpager: None,
     media: [ROOT; 2],
+    music: None,
 };
 
 fn room(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError>) -> Result<(), LvError> {
@@ -469,6 +472,18 @@ pub fn hpages(b: &mut Batch, back: bool) -> Result<Screen, LvError> {
         s.back[1] = button(b, p.pages[2], "Back", Kind::Secondary)?;
     }
     Ok(s)
+}
+
+/// `!music` (tests/test_music_e2e.py): the horizontal pager with the stock music tile on its third page, shown.
+pub fn music(b: &mut Batch) -> Result<Screen, LvError> {
+    let mut p = stock::hpager::<3>(b, 3)?;
+    for (i, page) in p.pages.into_iter().take(2).enumerate() {
+        pager_page(b, page, 0)?;
+        stock::title(b, page, ["Workout", "Heart"][i])?;
+    }
+    let m = stock::music(b, p.pages[2])?;
+    p.jump(b, 2)?;
+    Ok(Screen { page: p.obj, hpager: Some(p), music: Some(m), ..EMPTY })
 }
 
 /// "Alarm HH:MM".

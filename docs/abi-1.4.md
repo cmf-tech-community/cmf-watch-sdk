@@ -215,6 +215,32 @@ setter `0x100E07B8`): `0x31` phone link (u32), `0x4C` media available (u32), `0x
 - Emulator: no phone media there, so `test_hpager` checks the bind (one `MEDIA`, 0/0) and `-19`; the label writes
   and a real command need the phone (not proven).
 
+## Music tile (loader of 2026-11-16, no ABI bump)
+
+The stock workout screen's music page (`sport1_view`, id `0x64`, its third tile) as one object: `CREATE` with class
+**`Music` (11)**. The loader builds it with the stock tile's own calls, images and fonts (`fw/wp2-loader/src/music.rs`,
+`docs/recon.md` "Music tile"), so it is the stock tile pixel for pixel (`tests/test_music_e2e.py`). The page dots
+under it belong to the stock screen, not to the tile.
+
+- `CREATE h Music parent`: a 466 × 466 container in `parent` (any object but a pager; a page of `stock::hpager` in
+  practice) with "No music" or the track title (sans32) and artist (grey), previous / play-pause / next and volume.
+  One at a time (`-22` for a second). `-5` when the scene or its images do not load. `DEL` (of it or an ancestor)
+  and exit free its images, text and fonts.
+- The loader refreshes it once a second while the app runs in the foreground, as the stock paint (`0x101AF03C`):
+  with phone media title and artist, else "No music"; the play button grey without media, else pause while
+  playing and play while paused.
+- Taps: previous / play-pause / next send `0x4E` (3, 1 or 2, 4) when the phone link and media are up; play-pause
+  shows the other icon at once. Every tap also reaches the app: `Event { kind: LV, x: h, y: CLICKED (7), delta }`,
+  delta 0 play-pause, 1 previous, 2 next, 3 volume. Volume does nothing else (the stock volume popup and the stock
+  "connect the phone" popup are left out).
+- `VALUE h v`: v 1 shows pause, 0 play, until the phone's state next changes. Other values `-22`.
+- MEDIA events need `MEDIA_BIND` as before (it can bind no labels: handles 0).
+- SDK: `stock::music(&mut b, parent) -> Music { obj }`, `Music::event` (the button), `Music::playing(b, on)`,
+  `MUSIC_PLAY`…`MUSIC_VOLUME`. An older loader answers `-22` (class 11 is `BadValue`).
+- Emulator: `tests/test_music_e2e.py` compares the stock tile and ui-gallery's `!music` above the page dots, without
+  phone media and with a synthetic track (the four ux2sys getters pointed at RAM stubs): 0 pixels differ. Real
+  phone media and the keys reaching the phone are not proven.
+
 ## Escape with own_back (loader of 2026-11-16, no ABI bump)
 
 ABI 1.3 stopped an app that owns back when a `BUTTON` stayed unread for 1000 ms. A live app that is busy longer (a

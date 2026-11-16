@@ -348,4 +348,37 @@ impl<const N: usize> HPager<N> {
     }
 }
 
+/// The stock workout screen's music tile ([`Class::Music`]) in `parent` (a page): "No music" or the phone's track
+/// title and artist, previous / play-pause / next and volume, all with the stock images and fonts and filled by the
+/// loader once a second. Taps on previous / play-pause / next send the media keys themselves; every tap also comes
+/// to the app as `Event { kind: LV, x: obj, y: CLICKED, delta: MUSIC_PLAY..MUSIC_VOLUME }` ([`Music::event`]).
+#[derive(Clone, Copy)]
+pub struct Music {
+    pub obj: Obj,
+}
+
+/// [`Music::event`]: the button tapped.
+pub const MUSIC_PLAY: i16 = 0;
+pub const MUSIC_PREV: i16 = 1;
+pub const MUSIC_NEXT: i16 = 2;
+pub const MUSIC_VOLUME: i16 = 3;
+const CLICKED: i16 = 7;
+
+pub fn music(b: &mut Batch, parent: Obj) -> Result<Music, LvError> {
+    Ok(Music { obj: b.create(Class::Music, parent)? })
+}
+
+impl Music {
+    /// For every event: the button tapped, if this is a tap on this tile.
+    pub fn event(&self, e: &crate::Event) -> Option<i16> {
+        (e.kind == crate::LV && e.x as u16 == self.obj.0 && e.y == CLICKED).then_some(e.delta)
+    }
+
+    /// Shows pause (`true`) or play on the play button until the phone's state changes (the loader follows the
+    /// phone by itself; this is for an app that drives the state).
+    pub fn playing(&self, b: &mut Batch, on: bool) -> Result<(), LvError> {
+        b.value(self.obj, on.into(), false)
+    }
+}
+
 // ponytail: validated through lv-demo's host tests (they have wp2-core's validator), not here

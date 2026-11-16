@@ -71,7 +71,7 @@ class FocusListTest(unittest.TestCase):
 
             def focus():
                 at = harness.u32(emu, S + harness.APP_BLOCK_OFF) + harness.symbol(ELF, "STATS")
-                return struct.unpack("<10i", emu.peek(at, 40))[FOCUS]
+                return struct.unpack("<11i", emu.peek(at, 44))[FOCUS]
 
             def frame(name):
                 w, h, data = emu.frame()

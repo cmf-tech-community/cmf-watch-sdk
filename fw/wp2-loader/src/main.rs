@@ -15,6 +15,8 @@ mod hr;
 mod lv;
 #[cfg(target_os = "none")]
 mod media;
+#[cfg(target_os = "none")]
+mod music;
 mod menu;
 #[cfg(target_os = "none")]
 mod motor;
@@ -340,6 +342,7 @@ mod view {
         svc::tick(app::running(), app::paused());
         crate::hr::tick(app::running(), app::paused());
         crate::media::tick(app::running(), app::paused());
+        crate::music::tick();
         hold_face(app::running() && m.page.is_none());
         if app::running() {
             let exited = app::exited();
