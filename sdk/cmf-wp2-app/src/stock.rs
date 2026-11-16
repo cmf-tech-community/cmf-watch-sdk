@@ -118,6 +118,8 @@ pub fn row(b: &mut Batch, parent: Obj, letter: &str, name: &str, detail: &str) -
 
 /// Row height of a focus page: the stock app list's 96 px icon and its 8 px gap.
 pub const FOCUS_ROW_H: i32 = ICON + 8;
+/// Text x in a focus row: the stock app list's label sits 24 px right of the 96 px icon (docs/recon.md).
+pub const FOCUS_TEXT_X: i32 = ICON + 24;
 
 /// A full-screen page like the stock app list: the crown scrolls it, the round scroll bar shows, and its children
 /// follow the stock fisheye ([`Batch::focus`]): the one nearest the centre line is CHECKED and the app gets
@@ -129,17 +131,18 @@ pub fn focus_page(b: &mut Batch, icon: u16) -> Result<(Obj, Obj), LvError> {
     b.style(page, Prop::PadTop, 0, pad)?;
     b.style(page, Prop::PadBottom, 0, pad)?;
     b.style(page, Prop::PadRow, 0, 0)?;
-    if icon == FOCUS_CARDS {
-        // cards start at a fixed x; the loader centres each narrowed one with TRANSLATE_X (no relayout)
-        b.style(page, Prop::PadLeft, 0, (SCREEN - ROW_W) / 2)?;
-        b.flex(page, Flow::Column, FlexAlign::Start, FlexAlign::Start, FlexAlign::Start)?;
-    }
+    // rows and cards start at a fixed x, 16 like the stock rows: the loader centres each narrowed card with
+    // TRANSLATE_X (no relayout) and shifts a row's content with PAD_LEFT
+    b.style(page, Prop::PadLeft, 0, (SCREEN - ROW_W) / 2)?;
+    b.flex(page, Flow::Column, FlexAlign::Start, FlexAlign::Start, FlexAlign::Start)?;
     b.focus(page, icon)?;
     Ok((page, bar))
 }
 
-/// A row of a focus page, [`FOCUS_ROW_H`] high: transparent, a pill in the stock row colour while it is the centred
-/// one (CHECKED), lighter while pressed. It sends CLICKED. Its first child is the one the fisheye scales.
+/// A row of a focus page, [`FOCUS_ROW_H`] high: transparent like the stock app list's rows (the centred one is
+/// CHECKED but looks the same: the fisheye alone marks it), lighter while pressed. It sends CLICKED. Its first
+/// child is the one the fisheye scales, around its centre; put it at the row's left edge and the text
+/// [`FOCUS_TEXT_X`] from it, as the stock rows do.
 pub fn focus_row(b: &mut Batch, parent: Obj) -> Result<Obj, LvError> {
     let row = b.create(Class::Obj, parent)?;
     b.size(row, ROW_W, FOCUS_ROW_H)?;
@@ -147,8 +150,6 @@ pub fn focus_row(b: &mut Batch, parent: Obj) -> Result<Obj, LvError> {
         b.style(row, p, 0, 0)?;
     }
     b.style(row, Prop::Radius, 0, FOCUS_ROW_H / 2)?;
-    b.style(row, Prop::BgColor, CHECKED, ROW_BG)?;
-    b.style(row, Prop::BgOpa, CHECKED, 255)?;
     b.style(row, Prop::BgColor, PRESSED, ROW_PRESSED)?;
     b.style(row, Prop::BgOpa, PRESSED, 255)?;
     b.flags(row, &[], &[Flag::Scrollable])?;

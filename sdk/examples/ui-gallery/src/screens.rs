@@ -102,7 +102,7 @@ pub fn menu(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvEr
         *row = stock::focus_row(b, page)?;
         let circle = b.create(Class::Obj, *row)?;
         b.size(circle, ICON, ICON)?;
-        b.align(circle, Align::LeftMid, 4, 0)?;
+        b.align(circle, Align::LeftMid, 0, 0)?;
         b.style(circle, Prop::BgColor, 0, LETTER_BG)?;
         b.style(circle, Prop::BgOpa, 0, 255)?;
         b.style(circle, Prop::Radius, 0, CIRCLE)?;
@@ -115,7 +115,7 @@ pub fn menu(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvEr
         b.size(n, ROW_W - ICON - 64, 44)?;
         b.long_mode(n, LongMode::Dot)?;
         b.text(n, name)?;
-        b.align(n, Align::LeftMid, ICON as i16 + 28, 0)?;
+        b.align(n, Align::LeftMid, stock::FOCUS_TEXT_X as i16, 0)?;
     }
     Ok(s)
 }

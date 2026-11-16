@@ -436,6 +436,9 @@ fn shape_focus() {
         if !icon.is_null() {
             let side = (u32::from(s.focus_icon) * zoom / 256) as i32;
             stock!(LV_OBJ_SET_SIZE, fn(Obj, i32, i32))(icon, side, side);
+            // the stock icon zooms around its centre (simple_img_set_zoom keeps the 96 px box), so the smaller
+            // child 0 moves right by half of what it lost; its siblings stay put, as the stock label does
+            style(icon, LV_STYLE_TRANSLATE_X, ((i32::from(s.focus_icon) - side) / 2) as u32, 0);
         }
     }
     if best.1 == s.focus_sel {

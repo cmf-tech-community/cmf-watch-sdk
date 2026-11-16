@@ -783,7 +783,10 @@ LVGL's small built-in one, a widget without styles is bare. `stock` gives:
   `row` (letter circle, name, grey detail), `card`, plus `slider` and `arc` styles.
 
 - the stock app list: `focus_page(b, icon)` and `focus_row` (FOCUS: the fisheye, the centred row CHECKED, `FOCUSED`
-  events with its index), as herdr-agents uses them.
+  events with its index), as herdr-agents uses them. Like the stock list: rows from x 16, no pill behind the centred
+  row (the fisheye alone marks it), child 0 zooms around its centre, the crown and a drag scroll freely (no snap).
+  Put child 0 at the row's left edge and the text at `stock::FOCUS_TEXT_X`. Unlike the stock list, the first and
+  the last row can reach the centre line, so every row can be the focused one. Proof: `tests/test_focus_e2e.py`.
 - the stock Exercise list: `focus_page(b, FOCUS_CARDS)` and `focus_card` (cards that narrow away from the centre;
   a loader from 2026-11-13 on, `docs/abi-1.4.md`).
 - a vertical pager: `pager::<N>(b, n)` (full-screen pages that snap, page dots at the right edge; a loader from

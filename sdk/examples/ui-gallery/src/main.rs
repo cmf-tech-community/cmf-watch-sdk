@@ -34,9 +34,11 @@ mod device {
     const MEDIAS: usize = 6;
     const MEDIA_STATE: usize = 7;
     const KEY: usize = 8;
+    // the menu's centred row (last FOCUSED), -1 before the first
+    const FOCUS: usize = 9;
     // non-zero: in .data, fresh at every launch; RC 1 until the menu is built
     #[unsafe(no_mangle)]
-    static mut STATS: [i32; 9] = [1, 0, 0, 0, 0, -1, 0, -1, 1];
+    static mut STATS: [i32; 10] = [1, 0, 0, 0, 0, -1, 0, -1, 1, -1];
 
     fn set(i: usize, v: i32) {
         unsafe { (&raw mut STATS[i]).write_volatile(v) }
@@ -99,7 +101,9 @@ mod device {
                 }
                 LV => {
                     let h = e.x as u16;
-                    if e.y == CLICKED {
+                    if e.y == cmf_wp2_app::lv::FOCUSED {
+                        set(FOCUS, e.delta as i32);
+                    } else if e.y == CLICKED {
                         if let Some(i) = s.rows.iter().position(|r| r.0 == h) {
                             go = Some(Some(i));
                         } else if s.back.iter().any(|r| r.0 == h && h != 0) {
