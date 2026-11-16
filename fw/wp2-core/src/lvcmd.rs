@@ -595,13 +595,40 @@ pub fn media_bind(buf: &[u8]) -> Option<(bool, u16, u16)> {
 
 /// Music tile images: SPORT1_IMGS[MUSIC_IMG_FIRST..][..MUSIC_IMGS], indices into that run.
 pub const MUSIC_IMG_FIRST: usize = 6;
-pub const MUSIC_IMGS: usize = 7;
+pub const MUSIC_IMGS: usize = 13;
 pub const IMG_PAUSE: usize = 0;
 pub const IMG_PREV: usize = 1;
 pub const IMG_NEXT: usize = 2;
 pub const IMG_VOLUME: usize = 3;
 pub const IMG_PLAY: usize = 4;
 pub const IMG_PLAY_OFF: usize = 6;
+/// The volume popup's: muted and on icons, slider track and fill.
+pub const IMG_MUTED: usize = 9;
+pub const IMG_VOLUME_ON: usize = 10;
+pub const IMG_TRACK: usize = 11;
+pub const IMG_FILL: usize = 12;
+/// MEDIA_KEY-style ux2sys 0x4E volume commands, sent only by the volume popup.
+pub const MEDIA_VOLUME_UP: u8 = 5;
+pub const MEDIA_VOLUME_DOWN: u8 = 6;
+
+/// The volume popup's crown (sport1_view 0x10078FE4): six knob events one way make one volume command, with a
+/// vibration when the volume can still move that way. `counts` = (up, down); a positive step is up.
+pub fn volume_knob(counts: &mut (u8, u8), step: i32, cur: u8, max: u8) -> Option<(u8, bool)> {
+    if step > 0 {
+        *counts = (counts.0.wrapping_add(1), 0);
+    } else if step < 0 {
+        *counts = (0, counts.1.wrapping_add(1));
+    }
+    if counts.0 > 5 {
+        counts.0 = 0;
+        return Some((MEDIA_VOLUME_UP, cur < max));
+    }
+    if counts.1 > 5 {
+        counts.1 = 0;
+        return Some((MEDIA_VOLUME_DOWN, cur != 0));
+    }
+    None
+}
 /// "No music": SPORT1_TEXTS[14].
 pub const TEXT_NO_MUSIC: usize = 14;
 /// Music tile buttons: the `delta` of the app's `LV` CLICKED event (`x` = the tile's handle).
@@ -1051,5 +1078,16 @@ mod tests {
         assert_eq!(check(&[create(1, 10, 0), create(2, 11, 1)]), Err(Error::BadClass), "a pager holds pages");
         assert_eq!(check(&[create(1, 10, 0), create(2, 9, 1), create(3, 11, 2)]), Ok(()));
         assert_eq!([music_icon(false, true), music_icon(true, true), music_icon(true, false)], [IMG_PLAY_OFF, IMG_PAUSE, IMG_PLAY]);
+        let mut c = (0, 0);
+        assert!((0..5).all(|_| volume_knob(&mut c, 1, 3, 10).is_none()));
+        assert_eq!(volume_knob(&mut c, 1, 3, 10), Some((MEDIA_VOLUME_UP, true)));
+        assert_eq!(c, (0, 0));
+        (0..5).for_each(|_| assert!(volume_knob(&mut c, -1, 0, 10).is_none()));
+        assert_eq!(volume_knob(&mut c, 1, 0, 10), None); // a turn back starts over
+        assert_eq!(c, (1, 0));
+        (0..4).for_each(|_| assert!(volume_knob(&mut c, 1, 10, 10).is_none()));
+        assert_eq!(volume_knob(&mut c, 1, 10, 10), Some((MEDIA_VOLUME_UP, false)), "at the top: sent, no buzz");
+        (0..6).for_each(|_| _ = volume_knob(&mut c, -1, 0, 10));
+        assert_eq!(c, (0, 0));
     }
 }

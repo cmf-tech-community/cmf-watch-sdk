@@ -843,7 +843,7 @@ answers `-22` at `create`. ui-gallery's `!hpager` is the example.
 
 `stock::music(&mut b, page)` puts the stock workout screen's music page into a page: "No music" or the phone's
 track, previous / play-pause / next and volume, with the stock images and fonts. The loader fills it and sends the
-keys; `Music::event(&e)` tells the app which button was tapped, `Music::playing(&mut b, on)` sets the play button
+keys and opens the stock volume popup; `Music::event(&e)` tells the app which button was tapped, `Music::playing(&mut b, on)` sets the play button
 until the phone's state changes. One at a time; an older loader answers `-22`. ui-gallery's `!music` is the
 example (`docs/abi-1.4.md`, "Music tile").
 

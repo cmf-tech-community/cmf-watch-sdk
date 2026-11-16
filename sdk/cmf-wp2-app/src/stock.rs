@@ -350,7 +350,8 @@ impl<const N: usize> HPager<N> {
 
 /// The stock workout screen's music tile ([`Class::Music`]) in `parent` (a page): "No music" or the phone's track
 /// title and artist, previous / play-pause / next and volume, all with the stock images and fonts and filled by the
-/// loader once a second. Taps on previous / play-pause / next send the media keys themselves; every tap also comes
+/// loader once a second. Taps on previous / play-pause / next send the media keys themselves, volume opens the stock
+/// volume popup (+ / −, the crown, a right swipe closes it); every tap also comes
 /// to the app as `Event { kind: LV, x: obj, y: CLICKED, delta: MUSIC_PLAY..MUSIC_VOLUME }` ([`Music::event`]).
 #[derive(Clone, Copy)]
 pub struct Music {

@@ -280,6 +280,9 @@ fn exec(r: &Rec) -> Result<(), i32> {
             }
             let music = crate::music::handle();
             let music_gone = music != 0 && lvcmd::freed_by_del(&s.table, h).any(|x| x == music);
+            if music_gone {
+                crate::music::close(); // on the root, not under `h`
+            }
             stock!(LV_OBJ_DEL, fn(Obj))(o(h));
             if music_gone {
                 crate::music::free();
@@ -588,6 +591,7 @@ extern "C" fn on_pager(e: *mut c_void) {
 pub fn teardown() {
     let s = st();
     s.focus = 0; // before the delete, as in DEL
+    crate::music::close();
     if !s.objs[0].is_null() {
         // children first, scroll bars after their targets (created later)
         stock!(LV_OBJ_DEL, fn(Obj))(s.objs[0]);

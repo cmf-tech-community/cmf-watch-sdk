@@ -225,3 +225,12 @@ pub const SIMPLE_IMG_CREATE: u32 = 0x1005_A015;
 pub const SIMPLE_IMG_SET_SRC: u32 = 0x1005_A02D;
 pub const LV_OBJ_ALIGN_TO: u32 = 0x1012_A87D;
 pub const LV_STYLE_ANIM_SPEED: u32 = 0x66;
+// sport1_view's volume popup (0x100786DC): ux2sys 0x50 reads {max u8, current u8}; 0x26 vibrates ({8}, 4 B)
+pub const PROP_VOLUME: u32 = 0x50;
+pub const PROP_VIBRATE: u32 = 0x26;
+pub const UX2SYS_SET_LEN: u32 = 0x100E_08B9;
+// a pointer value (lv_img_dsc_t *): local style only through the loader, never STYLE
+pub const LV_STYLE_BG_IMG_SRC: u32 = 0x28;
+// (indev) -> gesture direction; (indev): wait for release, as the stock popup's gesture close does
+pub const LV_INDEV_GET_GESTURE_DIR: u32 = 0x101C_4F7D;
+pub const LV_INDEV_WAIT_RELEASE: u32 = 0x101C_4FD5;

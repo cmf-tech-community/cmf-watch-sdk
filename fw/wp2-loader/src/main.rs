@@ -176,8 +176,9 @@ mod view {
             return;
         }
         // a horizontal pager pages on a right swipe: the stock skips back for its workout screens (docs/recon.md),
-        // so the swipe is no BUTTON while one lives. The crown press still is (and still escapes).
-        if code & 0xFFFF == KEY_BACK && crate::lv::hpager() {
+        // so the swipe is no BUTTON while one lives; nor while the music tile's volume popup is open (the swipe closes
+        // it). The crown press still is (and still escapes).
+        if code & 0xFFFF == KEY_BACK && (crate::lv::hpager() || crate::music::popup()) {
             unsafe { *(data as *mut u8).add(4) = 1 };
             return;
         }

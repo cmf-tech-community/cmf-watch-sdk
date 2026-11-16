@@ -231,15 +231,21 @@ under it belong to the stock screen, not to the tile.
   playing and play while paused.
 - Taps: previous / play-pause / next send `0x4E` (3, 1 or 2, 4) when the phone link and media are up; play-pause
   shows the other icon at once. Every tap also reaches the app: `Event { kind: LV, x: h, y: CLICKED (7), delta }`,
-  delta 0 play-pause, 1 previous, 2 next, 3 volume. Volume does nothing else (the stock volume popup and the stock
-  "connect the phone" popup are left out).
+  delta 0 play-pause, 1 previous, 2 next, 3 volume. With phone media volume also opens the stock volume popup
+  (`0x100786DC`) over the app (on its root, so a pager does not scroll under it): the volume pill, a slider with the
+  phone's volume (`0x50`, refreshed once a second), + and − send `0x4E` 5 / 6, six crown steps one way send one
+  (with a buzz while the volume can move), a right swipe closes it. While it is open the right swipe is no BUTTON
+  and the crown goes to it; the app gets no event from it. The stock "connect the phone" popup is left out.
 - `VALUE h v`: v 1 shows pause, 0 play, until the phone's state next changes. Other values `-22`.
 - MEDIA events need `MEDIA_BIND` as before (it can bind no labels: handles 0).
 - SDK: `stock::music(&mut b, parent) -> Music { obj }`, `Music::event` (the button), `Music::playing(b, on)`,
   `MUSIC_PLAY`…`MUSIC_VOLUME`. An older loader answers `-22` (class 11 is `BadValue`).
 - Emulator: `tests/test_music_e2e.py` compares the stock tile and ui-gallery's `!music` above the page dots, without
-  phone media and with a synthetic track (the four ux2sys getters pointed at RAM stubs): 0 pixels differ. Real
-  phone media and the keys reaching the phone are not proven.
+  phone media and with a synthetic track (the four ux2sys getters pointed at RAM stubs): 0 pixels differ. The
+  volume popup over the whole screen: 0 pixels differ (volume 8 of 16 from a stub getter; the slider's alpha images
+  stop the emulator, stock and loader alike, so the test draws them opaque), and +, −, the crown and the closing
+  swipe are checked with a recorder on the `0x4E` setter. Real phone media and the keys reaching the phone are not
+  proven.
 
 ## Escape with own_back (loader of 2026-11-16, no ABI bump)
 

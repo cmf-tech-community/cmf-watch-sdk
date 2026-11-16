@@ -31,7 +31,7 @@ static mut STATE: State = State { polled_at: 0, last: None, info: [0; 0x82] };
 // the getter's out buffer: the stock reads into 504 B for every property
 static mut OUT: [u32; 128] = [0; 128];
 
-fn get(prop: u32) -> &'static [u32; 128] {
+pub fn get(prop: u32) -> &'static [u32; 128] {
     let out = unsafe { &mut *addr_of_mut!(OUT) };
     out[0] = 0;
     stock!(UX2SYS_GET, fn(u32, *mut u32))(prop, out.as_mut_ptr());
