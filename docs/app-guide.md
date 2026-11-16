@@ -771,7 +771,8 @@ repaints only the changed sector.
 
 Instead of drawing with `rect`, an app can build a screen from the watch's own LVGL 8.3 widgets, fonts and
 scrolling. Contract, records and budgets: `docs/abi-1.2.md`. Examples: `sdk/examples/ui-gallery` (every widget in
-the stock look: a stock focus list of sections with buttons, switches, gauges, a time picker, the stock fonts and a pager),
+the stock look: a stock focus list of sections with buttons, switches, gauges, a time picker, the stock fonts, label
+long modes, the Exercise cards and both pagers; the table below),
 `herdr-agents` (a live focus list) and `sdk/examples/lv-demo`
 (a crown-scrolled page with the title, a card with a slider driving an arc, a row per haptic pattern).
 
@@ -836,6 +837,43 @@ to `HPager::event` (it returns the page it settled on); `go(i)` glides, `jump(i)
 with the app (CROWN events). While a horizontal pager lives the right swipe pages back and is **not** `BUTTON`:
 the app leaves with the crown press. Loader of 2026-11-16 (`docs/abi-1.4.md`, "Horizontal pager"); an older loader
 answers `-22` at `create`. ui-gallery's `!hpager` is the example.
+
+### Stock components: SDK and ui-gallery
+
+What the stock apps are built from (`docs/recon-lvgl.md`, "Widget classes present" and "Vendor components"; the
+stock app list, Settings, Exercise and workout screens in the emulator), what the SDK gives for it and where
+ui-gallery shows it. "Composed": no stock widget, built from `Obj`/`Btn`/`Slider` and styles in the app.
+
+| Stock component | SDK | ui-gallery |
+|---|---|---|
+| Full-screen list, crown scrolling, round scroll bar (`jx_scroll_bar`) | `stock::page`, `Batch::knob`, `scroll_bar` | every section |
+| Accent title | `stock::title` | every section |
+| Settings row: icon circle, name, grey detail | `stock::row` (a letter in the circle, no image) | Lists |
+| App list with the fisheye | `stock::focus_page(icon)`, `focus_row` | the menu |
+| Exercise list: cards narrowing off the centre | `stock::focus_page(FOCUS_CARDS)`, `focus_card` | Cards |
+| Panel for controls | `stock::card` | Switches, Gauges, Text |
+| Pill button: accent, secondary, outline, disabled | composed (`Class::Btn` + styles; no `stock` helper) | Buttons |
+| Toggle switch (no `lv_switch` in the firmware) | composed: a 0..1 `Slider` with `stock::slider` | Switches |
+| Checkbox (no `lv_checkbox`) | composed: a `Checkable` `Btn` | Switches |
+| Slider | `Class::Slider` + `stock::slider` | Gauges |
+| Progress bar | `Class::Bar` | Gauges |
+| Arc / ring progress | `Class::Arc` + `stock::arc`, `angles` | Gauges |
+| Time picker (`lv_roller`, vendor `text_roller`) | `Class::Roller`, `options` | Picker |
+| Stock fonts (16 `font*.font` files) | `StockFont`, 4 slots at a time | Fonts (18M, 24M, 32M, 48M) |
+| Label long modes (dots, scrolling text) | `long_mode`, `LongMode` | Text |
+| Vertical pager with page dots (`lv_tileview`) | `stock::pager` | Pages |
+| Horizontal pager, the workout screen | `stock::hpager` | Swipe; `!hpager` with music labels |
+| Phone music labels | `Api::media_bind` | `!hpager` (tests/test_pager_e2e.py) |
+| Tap haptic | `cmf_wp2_ui::haptic::TICK` | rows, buttons, switches |
+| Images and icons (`lv_img`, vendor `simple_img`, `lv_imgbtn`) | no (no image source in the LVGL records) | no |
+| Frame animation (`jx_pic_anim`) | no | no |
+| Chart (`lv_chart`: heart rate, sleep, steps) | no | no |
+| Popup / confirm dialog (stock popup views) | no (composable from `card` and buttons) | no |
+| Loading spinner (no `lv_spinner`) | no (composable: an `Arc` the app turns) | no |
+| QR code (`lv_qrcode`) | no | no |
+| Key matrix (`lv_btnmatrix`) | no | no |
+| Canvas (`lv_canvas`) | no in LVGL; pixel drawing is `cmf-wp2-ui` | no (kit-gallery) |
+| Widget tile left of the watch face; page next to it | `Api::widget` (the stub draws it); `app_features!(PAGE)` | no (not a screen inside an app) |
 
 ### LVGL or `cmf-wp2-ui`?
 

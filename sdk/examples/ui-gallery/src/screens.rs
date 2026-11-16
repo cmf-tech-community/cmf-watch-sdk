@@ -5,7 +5,7 @@
 use cmf_wp2_app::lv::*;
 use cmf_wp2_app::stock::{self, ACCENT, CIRCLE, GREY, ICON, LETTER_BG, ROW_BG, ROW_PRESSED, ROW_W, WHITE};
 
-pub const SECTIONS: [(&str, &str); 7] = [
+pub const SECTIONS: [(&str, &str); 10] = [
     ("L", "Lists"),
     ("B", "Buttons"),
     ("S", "Switches"),
@@ -13,9 +13,16 @@ pub const SECTIONS: [(&str, &str); 7] = [
     ("P", "Picker"),
     ("F", "Fonts"),
     ("V", "Pages"),
+    ("C", "Cards"),
+    ("T", "Text"),
+    ("H", "Swipe"),
 ];
 /// The section with the vertical pager.
 pub const PAGES: usize = 6;
+/// The stock Exercise list (`focus_page(FOCUS_CARDS)`).
+pub const CARDS: usize = 7;
+/// The horizontal pager.
+pub const SWIPE: usize = 9;
 pub const N: usize = SECTIONS.len();
 /// Font slots besides the system font (slot 0).
 pub const F24: u8 = 1;
@@ -181,8 +188,11 @@ fn labelled(b: &mut Batch, parent: Obj, text: &str) -> Result<(Obj, Obj), LvErro
 pub fn section(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError>, i: usize)
     -> Result<Screen, LvError> {
     room(b, flush)?;
-    if i == PAGES {
-        return pages(b, flush);
+    match i {
+        PAGES => return pages(b, flush),
+        CARDS => return cards(b, flush),
+        SWIPE => return hpages(b, true),
+        _ => {}
     }
     let (page, _bar) = stock::page(b)?;
     let mut s = Screen { page, section: Some(i), ..EMPTY };
@@ -323,6 +333,25 @@ pub fn section(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), L
             b.text(picked, "Alarm 07:30")?;
             (s.hours, s.minutes, s.picked) = (rollers[0], rollers[1], picked);
         }
+        8 => {
+            // the label long modes: one fixed-size label each, same long text
+            const LONG: &str = "Morning run, 5.2 km along the river";
+            for (mode, h, name) in [(LongMode::Wrap, 100, "Wrap"), (LongMode::Dot, 44, "Dot"), (LongMode::Scroll, 44, "Scroll"),
+                (LongMode::ScrollCircular, 44, "Circular"), (LongMode::Clip, 44, "Clip")] {
+                room(b, flush)?;
+                let card = stock::card(b, page, h + 72)?;
+                let n = b.create(Class::Label, card)?;
+                b.style(n, Prop::TextColor, 0, GREY)?;
+                b.style(n, Prop::TextFont, 0, F24 as i32)?;
+                b.text(n, name)?;
+                b.align(n, Align::TopLeft, 36, 16)?;
+                let l = b.create(Class::Label, card)?;
+                b.size(l, ROW_W - 72, h)?;
+                b.long_mode(l, mode)?;
+                b.text(l, LONG)?;
+                b.align(l, Align::TopLeft, 36, 52)?;
+            }
+        }
         _ => {
             for (font, text) in [(F18, "Aa 18 Font"), (F24, "Aa 24 Font"), (stock::FONT, "Aa 32 Font"), (F48, "Aa 48")] {
                 room(b, flush)?;
@@ -342,6 +371,23 @@ pub fn section(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), L
     }
     room(b, flush)?;
     s.back[1] = button(b, page, "Back", Kind::Secondary)?;
+    Ok(s)
+}
+
+/// The stock Exercise list: a FOCUS_CARDS focus page; the centred card is full width, the others narrow. The last
+/// card is "Back" (a focus page has no title).
+fn cards(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError>) -> Result<Screen, LvError> {
+    let (page, _bar) = stock::focus_page(b, FOCUS_CARDS)?;
+    b.style(page, Prop::PadRow, 0, stock::ROW_GAP)?;
+    let mut s = Screen { page, section: Some(CARDS), ..EMPTY };
+    for (k, name) in ["Outdoor run", "Walk", "Cycling", "Pool swim", "Back"].into_iter().enumerate() {
+        room(b, flush)?;
+        let c = stock::focus_card(b, page, stock::FOCUS_ROW_H)?;
+        let l = b.create(Class::Label, c)?;
+        b.text(l, name)?;
+        b.align(l, Align::LeftMid, 36, 0)?;
+        if k == 4 { s.back[1] = c } else { s.ticks[k] = c }
+    }
     Ok(s)
 }
 
@@ -388,21 +434,35 @@ fn pages(b: &mut Batch, flush: &mut impl FnMut(&mut Batch) -> Result<(), LvError
     Ok(s)
 }
 
-/// `!hpager` (tests/test_pager_e2e.py): a horizontal pager as the stock workout screen, three pages "1"…"3"; page 2
-/// holds the track title and artist labels for `media_bind`. Leave with the crown press.
-pub fn hpages(b: &mut Batch) -> Result<Screen, LvError> {
+/// The horizontal pager as the stock workout screen, three pages "1"…"3"; page 2 holds the track title and artist
+/// labels for `media_bind` (`!hpager`, tests/test_pager_e2e.py). The crown press leaves the app; as the "Swipe"
+/// section (`back`) page 3 also has "Back".
+pub fn hpages(b: &mut Batch, back: bool) -> Result<Screen, LvError> {
     let p = stock::hpager::<3>(b, 3)?;
-    let mut s = Screen { page: p.obj, hpager: Some(p), ..EMPTY };
+    let mut s = Screen { page: p.obj, section: back.then_some(SWIPE), hpager: Some(p), ..EMPTY };
     for (i, page) in p.pages.into_iter().enumerate() {
         pager_page(b, page, 0)?;
         stock::title(b, page, ["Workout", "Music", "Last"][i])?;
         let big = b.create(Class::Label, page)?;
         b.style(big, Prop::TextFont, 0, F48 as i32)?;
-        b.text(big, ["1", "2", "3"][i])?;
+        b.text(big, if back { ["1 / 3", "2 / 3", "3 / 3"][i] } else { ["1", "2", "3"][i] })?;
     }
     for (k, text) in ["No title", "No artist"].into_iter().enumerate() {
         s.media[k] = b.create(Class::Label, p.pages[1])?;
         b.text(s.media[k], text)?;
+    }
+    if back {
+        let hint = b.create(Class::Label, p.pages[0])?;
+        b.style(hint, Prop::TextColor, 0, GREY)?;
+        b.style(hint, Prop::TextFont, 0, F24 as i32)?;
+        b.text(hint, "Swipe left or right")?;
+        // a workout metric, as on the stock workout screen
+        let (card, _) = labelled(b, p.pages[0], "Heart rate")?;
+        let bpm = b.create(Class::Label, card)?;
+        b.style(bpm, Prop::TextColor, 0, ACCENT)?;
+        b.text(bpm, "128")?;
+        b.align(bpm, Align::RightMid, -36, 0)?;
+        s.back[1] = button(b, p.pages[2], "Back", Kind::Secondary)?;
     }
     Ok(s)
 }

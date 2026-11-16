@@ -1,6 +1,7 @@
 //! ui-gallery: the watch's own widgets (ABI 1.2, LVGL) in the stock look: a stock focus list of sections (lists,
-//! buttons, switches, gauges, a time picker, the stock fonts); a section opens on a tap and goes back with its
-//! title or "Back". The crown scrolls. "Pages" is the vertical pager (`stock::pager`). Host messages for tests/test_gallery_e2e.py: `!open N`, `!menu`;
+//! buttons, switches, gauges, a time picker, the stock fonts, the label long modes); a section opens on a tap and goes
+//! back with its title or "Back". The crown scrolls. "Pages" is the vertical pager (`stock::pager`), "Cards" the
+//! stock Exercise list (`FOCUS_CARDS`), "Swipe" the horizontal pager (`stock::hpager`). Host messages for tests/test_gallery_e2e.py: `!open N`, `!menu`;
 //! for tests/test_pager_e2e.py `!hpager` (the horizontal pager with music labels), `!key N` (media_key).
 #![cfg_attr(target_os = "none", no_std, no_main)]
 
@@ -144,7 +145,7 @@ mod device {
                 _ => {}
             }
             if core::mem::take(&mut hp) {
-                match screens::leave(&mut b, &s).and_then(|_| screens::hpages(&mut b)) {
+                match screens::leave(&mut b, &s).and_then(|_| screens::hpages(&mut b, false)) {
                     Ok(next) => {
                         s = next;
                         set(RC, code(b.submit(&lv)));
