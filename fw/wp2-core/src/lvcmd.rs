@@ -574,11 +574,12 @@ pub const MEDIA_PAUSE: u8 = 2;
 pub const MEDIA_PREV: u8 = 3;
 pub const MEDIA_NEXT: u8 = 4;
 
-/// MEDIA_KEY record (op 0x16, handle 0, payload `[cmd]`, cmd 1 play, 2 pause, 3 previous, 4 next), alone in a
-/// batch (docs/abi-1.4.md, "Music"). On an older loader op 0x16 is `Malformed` (-22).
+/// MEDIA_KEY record (op 0x16, handle 0, payload `[cmd]`, cmd 1 play, 2 pause, 3 previous, 4 next, 5 volume up,
+/// 6 volume down), alone in a batch (docs/abi-1.4.md, "Music"). On an older loader op 0x16 is `Malformed` (-22);
+/// a loader of 2026-11-16 answers `-22` to 5 and 6.
 pub fn media_key(buf: &[u8]) -> Option<u8> {
     match *buf {
-        [0x16, 1, 0, 0, cmd @ MEDIA_PLAY..=MEDIA_NEXT] => Some(cmd),
+        [0x16, 1, 0, 0, cmd @ MEDIA_PLAY..=MEDIA_VOLUME_DOWN] => Some(cmd),
         _ => None,
     }
 }
@@ -607,7 +608,7 @@ pub const IMG_MUTED: usize = 9;
 pub const IMG_VOLUME_ON: usize = 10;
 pub const IMG_TRACK: usize = 11;
 pub const IMG_FILL: usize = 12;
-/// MEDIA_KEY-style ux2sys 0x4E volume commands, sent only by the volume popup.
+/// ux2sys 0x4E volume commands: the volume popup's buttons and crown, and MEDIA_KEY from an app.
 pub const MEDIA_VOLUME_UP: u8 = 5;
 pub const MEDIA_VOLUME_DOWN: u8 = 6;
 
@@ -1049,7 +1050,9 @@ mod tests {
     fn media_records() {
         assert_eq!(media_key(&[0x16, 1, 0, 0, 2]), Some(MEDIA_PAUSE));
         assert_eq!(media_key(&[0x16, 1, 0, 0, 0]), None);
-        assert_eq!(media_key(&[0x16, 1, 0, 0, 5]), None); // no volume
+        assert_eq!(media_key(&[0x16, 1, 0, 0, 5]), Some(MEDIA_VOLUME_UP));
+        assert_eq!(media_key(&[0x16, 1, 0, 0, 6]), Some(MEDIA_VOLUME_DOWN));
+        assert_eq!(media_key(&[0x16, 1, 0, 0, 7]), None);
         assert_eq!(media_bind(&[0x17, 5, 0, 0, 1, 3, 0, 4, 0]), Some((true, 3, 4)));
         assert_eq!(media_bind(&[0x17, 5, 0, 0, 2, 3, 0, 4, 0]), None);
         // on an older loader both are Malformed

@@ -199,11 +199,13 @@ pager"). Emulator proof: `tests/test_pager_e2e.py` `test_hpager` (ui-gallery `!h
 The phone's music, as the stock music view and workout screen control it (ux2sys, getter `0x100E082C(prop, out)`,
 setter `0x100E07B8`): `0x31` phone link (u32), `0x4C` media available (u32), `0x4D` playing (u32), `0x4E` command
 (set, u32: 1 play, 2 pause, 3 previous, 4 next; the stock sends it only when `0x31` and `0x4C` are non-zero),
-`0x4F` title `[0..0x40]` and artist `[0x41..0x81]` (NUL-terminated). Volume (`0x50`) is not offered.
+`0x4F` title `[0..0x40]` and artist `[0x41..0x81]` (NUL-terminated). Reading the volume (`0x50`) is not offered; volume up and down are (MEDIA_KEY 5, 6).
 
-- **MEDIA_KEY** record, alone in a batch: `[0x16, 1, 0, 0, cmd]`, cmd 1..=4. The UI tick checks the link and media
-  and sets `0x4E`; the app thread waits for it as for an LVGL batch (with the panel dark it returns once it is lit).
-  `0`, `-19` without a phone link or media, `-22` for another cmd and on an older loader.
+- **MEDIA_KEY** record, alone in a batch: `[0x16, 1, 0, 0, cmd]`, cmd 1..=4, and since the next loader 5 volume up
+  and 6 volume down (the volume popup's own commands, one phone volume step each). The UI tick checks the link and
+  media and sets `0x4E`; the app thread waits for it as for an LVGL batch (with the panel dark it returns once it is
+  lit). `0`, `-19` without a phone link or media, `-22` for another cmd and on an older loader (the loader of
+  2026-11-16: `-22` for 5 and 6).
 - **MEDIA_BIND** record, alone in a batch: `[0x17, 5, 0, 0, on, title u16, artist u16]`. `on = 1`: from the next UI
   tick, once a second while the app runs in the foreground, the loader reads `0x4D`, `0x31`/`0x4C` and `0x4F`; it
   queues `Event { kind: MEDIA (10), x: playing, y: available }` once at the bind and on every change, and writes
