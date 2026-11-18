@@ -195,6 +195,11 @@ uv run --locked wp2apps install target/<name>.wp2app --address <UUID>
 - `install` without `--slot` reuses the slot of a package with the same name (an update, keeps its stored data),
   else the first free one. Installing into the slot of the running app, or the loader while its menu is open, is
   refused with `BUSY` (`fw/wp2-stub/src/ble.rs`, `busy`). Close the app first.
+- An app page behind the face (section "Page") holds the loader too, but from stub 6 on that is no `BUSY`: the loader
+  and the page's app take the install while the page is not in view, keep running the old code, and the page loads
+  the new loader and starts the new app the next time it comes into view (`behind_face`, `fw/wp2-stub/src/view.rs`,
+  `tests/test_page_install_e2e.py`). Nothing to remove first, no host change. A page in view is a foreground app:
+  `BUSY` as before. `remove` of the page's app or the loader still answers `BUSY`; stub 5 answers `BUSY` to both.
 - `install`, `list` and `remove` do a full bind, and the stock then shows a "Paired" popup. Close it with the
   button. If an app was running, closing that popup ends it (section 4).
 - Open an app: stock app list (list style, not waterfall) → "Custom Apps", the first row → tap the app's row (the

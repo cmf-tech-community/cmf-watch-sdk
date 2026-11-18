@@ -267,3 +267,5 @@ can't be read back. So the stub answers its own release:
 - An older stub parses `0xFE` as a bad slot and answers `BadRequest` (1): version 1. Stock firmware has no stub and
   doesn't answer at all. One request tells the three apart: no reply, `01`, `00 …`.
 - Host: `install.stub` (`wp2apps list` prints it as `stub`).
+- Stub 6: `BEGIN` into the loader slot or an app page's slot is no longer `BUSY` while the page is only behind the
+  face; the page reloads on its next FOCUS (`docs/app-guide.md`, install notes). Same frames, same statuses.

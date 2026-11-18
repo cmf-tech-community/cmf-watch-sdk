@@ -10,6 +10,7 @@ use wp2_core::layout::{
 use wp2_core::pkg::{check_slot, crc32, parse_header, HEADER_SIZE};
 use wp2_core::proto::{parse, Request, Status, ANY_SLOT, DELETE, EVENT, INFO, MAX_DATA, PING};
 use wp2_core::aes;
+use wp2_core::cards::page_slot;
 use wp2_core::stock::{APP_SECRET, AUTHKEY, KV_GET, OS_SLEEP, SESSION_KEY, STREAM_SPACE, WEWEAR_CTX};
 
 const READ_PAYLOAD: u32 = 0x100CC285;
@@ -155,8 +156,16 @@ fn reply(ram: &mut StubRam, c2: u16, plain: &[u8]) -> bool {
     send(r.as_ptr(), (HEADER_LEN + n as usize) as u32) == 0
 }
 
+// the package of the loader or of the running app is in use (DELETE refuses then)
 fn busy(ram: &StubRam, slot: u8) -> bool {
     if slot == LOADER_SLOT { ram.loader_active != 0 } else { slot == ram.running_slot }
+}
+
+// Stub 6: the loader is held only by an app page that is not in view (behind the face). Its code and the app's run
+// from RES heap copies, not from the files, so an install may replace them; `end` marks the page for a reload on
+// its next FOCUS (view.rs). The menu (0xF0) or a page in view stays BUSY: that is an app in the foreground.
+fn behind_face(ram: &StubRam) -> bool {
+    ram.loader_active != 0 && page_slot(u32::from(ram.loader_view)).is_some() && ram.loader_focus == 0
 }
 
 fn status(out: &mut [u8], s: Status) -> usize {
@@ -281,7 +290,7 @@ fn abort(ram: &mut StubRam) {
 }
 
 fn begin(ram: &mut StubRam, slot: u8, size: u32, crc: u32) -> Status {
-    if busy(ram, slot) {
+    if busy(ram, slot) && !behind_face(ram) {
         return Status::Busy;
     }
     let limit = if slot == LOADER_SLOT { LOADER_SIZE } else { APP_SIZE };
@@ -343,6 +352,8 @@ fn end(ram: &mut StubRam) -> Status {
     };
     if s != Status::Ok {
         fs::unlink(&tmp);
+    } else if busy(ram, slot) {
+        ram.reload = 1;
     }
     ram.xfer_state = 0;
     s

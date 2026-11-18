@@ -5,6 +5,8 @@ use wp2_core::load::load;
 
 const PRELOAD: u32 = 2;
 const DELETE: u32 = 4;
+const FOCUS: u32 = 7;
+const DEFOCUS: u32 = 8;
 const REFUSE: i32 = -2;
 
 type Proc = extern "C" fn(u32, u32, *mut c_void) -> i32;
@@ -16,7 +18,18 @@ pub extern "C" fn wp2_view_proc(view_id: u32, msg: u32, data: *mut c_void) -> i3
     if msg != PRELOAD && ram.loader_state == 1 && u32::from(ram.loader_view) != view_id {
         return 0; // a view whose instance another view took over
     }
+    if msg == FOCUS || msg == DEFOCUS {
+        ram.loader_focus = (msg == FOCUS) as u8;
+    }
+    if msg == FOCUS && ram.reload != 0 && ram.loader_state == 1 {
+        // a new loader or page app arrived while this page was behind the face (ble.rs `end`): drop the old instance
+        // and load the new one as a PRELOAD would; its preload asks the stock for a fresh LAYOUT, which starts the app
+        if wp2_view_proc(view_id, PRELOAD, core::ptr::null_mut()) < 0 {
+            return REFUSE;
+        }
+    }
     if msg == PRELOAD {
+        ram.reload = 0;
         ram.loader_view = view_id as u16;
         if ram.loader_state == 1 {
             // a second PRELOAD without DELETE: let the old instance free its framebuffer first
@@ -45,6 +58,7 @@ pub extern "C" fn wp2_view_proc(view_id: u32, msg: u32, data: *mut c_void) -> i3
         return REFUSE;
     }
     if msg == DELETE {
+        ram.loader_focus = 0;
         release(ram);
         ram.loader_state = 0;
     }

@@ -11,7 +11,7 @@ pub const LOADER_ABI_MINOR: u16 = 3;
 // 3 = the Apps widget in wgt_reg slot 0x40 (docs/recon.md, "Widget cards")
 // 4 = app widgets: 0x40 with param_id slot + 1 shows the app's record and launches it on a tap
 // 5 = app pages: views 0xF8 + slot run the loader too, which starts that app (cards.rs)
-pub const STUB_VERSION: u32 = 5;
+pub const STUB_VERSION: u32 = 6;
 // INFO for this slot answers the stub's version instead of a package header; an older stub answers BadRequest
 pub const STUB_SLOT: u8 = 0xFE;
 pub const STUB_RAM: u32 = 0x3871_EEC0;
@@ -107,6 +107,11 @@ pub struct StubRam {
     // the view the loaded loader belongs to: 0xF0 (menu) or 0xF8 + slot (an app's page, cards.rs). Messages of another
     // view while it is loaded are ignored, so a page left behind cannot delete the instance a later view took over
     pub loader_view: u16,
+    // stub 6: 1 while loader_view has focus (msg 7 until 8). A page without it is only behind the face, so an install
+    // into the loader or the page's app is taken (ble.rs `busy`)
+    pub loader_focus: u8,
+    // stub 6: such an install landed; the page's next FOCUS loads the loader again from NAND (view.rs)
+    pub reload: u8,
 }
 
 pub const KICK_MAGIC: u32 = 0x4B43_494B; // "KICK"
@@ -137,6 +142,10 @@ mod tests {
         assert_eq!(offset_of!(StubRam, api), 9);
         assert_eq!(offset_of!(StubRam, launch), 0xB);
         assert_eq!(offset_of!(StubRam, host_key), 0x72C);
+        // stub 6, read by tests/test_page_install_e2e.py
+        assert_eq!(offset_of!(StubRam, loader_view), 0xB62);
+        assert_eq!(offset_of!(StubRam, loader_focus), 0xB64);
+        assert_eq!(offset_of!(StubRam, reload), 0xB65);
         assert!(size_of::<StubRam>() <= 0xE00);
     }
 
