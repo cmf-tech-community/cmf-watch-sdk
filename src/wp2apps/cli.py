@@ -169,6 +169,17 @@ def cmd_install(args):
     print(json.dumps({"installed": slot_name(slot)}))
 
 
+def cmd_push(args):
+    if args.blob is not None:
+        kind, data = install.PUSH_BLOB, bytes.fromhex(args.blob)
+    elif args.title is not None:
+        kind, data = install.PUSH_WIDGET, install.widget_record(args.title, args.value)
+    else:
+        kind, data = install.PUSH_WIDGET, b""
+    asyncio.run(with_watch(args, lambda s: install.push(s, args.slot, kind, data)))
+    print(json.dumps({"pushed": slot_name(args.slot), "kind": ("widget", "blob")[kind], "bytes": len(data)}))
+
+
 def cmd_remove(args):
     asyncio.run(with_watch(args, lambda s: install.remove(s, args.slot)))
     print(json.dumps({"removed": slot_name(args.slot)}))
@@ -329,13 +340,21 @@ def parser():
                                  ("list", cmd_list, "List installed packages"),
                                  ("send", cmd_send, "Send one message to the running app (ABI 1.1)"),
                                  ("listen", cmd_listen, "Print the running app's messages as JSON lines"),
-                                 ("chat", cmd_chat, "Type lines to the running app, print what it sends back")):
+                                 ("chat", cmd_chat, "Type lines to the running app, print what it sends back"),
+                                 ("push", cmd_push, "Set an app's widget text or start blob while it does not run "
+                                  "(stub 8, docs/widget-push.md); no --title/--blob clears the widget")):
         sub = commands.add_parser(name, help=help_)
         if name == "install":
             sub.add_argument("package", type=Path)
             sub.add_argument("--slot", type=slot_arg)
         if name == "remove":
             sub.add_argument("--slot", type=slot_arg, required=True)
+        if name == "push":
+            sub.add_argument("--slot", type=app_slot_arg, required=True)
+            what = sub.add_mutually_exclusive_group()
+            what.add_argument("--title", help="widget title (<= 23 bytes); --value is the text below it")
+            what.add_argument("--blob", metavar="HEX", help="start blob (<= 128 bytes); empty string removes it")
+            sub.add_argument("--value", default="", help="widget value (<= 39 bytes, \\n for a second line)")
         if name in ("send", "listen", "chat"):
             sub.add_argument("--slot", type=app_slot_arg, default=channel.ANY,
                              help="only this app slot (default: whatever runs)")

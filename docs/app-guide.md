@@ -404,6 +404,8 @@ and a white value, on the stock card grey in the system font. The app only store
   synchronously: call it when the value changes or at exit, never per frame.
 - The card reads the record when it is laid out, and that happens every time the watch face shows. The app runs only
   under the loader view, so its update is on the card the next time the user goes back to the face and swipes left.
+- From stub 8 the phone can also set the record while the app does not run (`PUSH`, at most once a minute), and a
+  small blob the app gets as its first host message at start: `docs/widget-push.md`.
 - Before the first call the tile shows the package name; an empty slot shows "Apps".
 - Declare it: `cmf_wp2_app::app_features!(cmf_wp2_app::WIDGET);` next to `entry!`. The user then adds it on the
   watch: a long press on the app's row in Apps → "Add widget" (again: "Remove widget"). It goes next to other app

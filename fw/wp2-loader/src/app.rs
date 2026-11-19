@@ -83,7 +83,7 @@ pub fn launch(slot: u8) -> Result<(), i32> {
     POLLED_AT.store(millis(), Ordering::Relaxed);
     motor::reset();
     QUEUE.clear();
-    svc::start(h.abi_minor);
+    svc::start(slot, h.abi_minor);
     ui::canvas().fill_rect(0, 0, 466, 466, 0);
     ui::PENDING.store(gfx::EMPTY, Ordering::Relaxed);
     ui::PUBLISHED.store(gfx::FULL, Ordering::Release);

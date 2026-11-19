@@ -4,14 +4,18 @@ use core::sync::atomic::Ordering;
 use wp2_core::fs::{self, File};
 use wp2_core::chan::{listening, session_word, MSG_MAX};
 use wp2_core::layout::{
-    data_path, slot_path, stub_ram, StubRam, APP_PAUSED, APP_SIZE, APP_V11, DIR, LOADER_ABI_MINOR, LOADER_SIZE,
+    blob_path, data_path, slot_path, widget_path, stub_ram, StubRam, APP_PAUSED, APP_SIZE, APP_V11, DIR,
+    LOADER_ABI_MINOR, LOADER_SIZE,
     LOADER_SLOT, STUB_VERSION,
 };
 use wp2_core::pkg::{check_slot, crc32, parse_header, HEADER_SIZE};
-use wp2_core::proto::{parse, Request, Status, ANY_SLOT, DELETE, EVENT, INFO, MAX_DATA, PING};
+use wp2_core::proto::{parse, push_wait, Request, Status, ANY_SLOT, DELETE, EVENT, INFO, MAX_DATA, PUSH, PUSH_WIDGET};
 use wp2_core::aes;
 use wp2_core::cards::{page_slot, APP_WIDGET, PAGE_VIEW};
-use wp2_core::stock::{APP_SECRET, CARDS_SAVE, CARDS_STORE, AUTHKEY, KV_GET, OS_SLEEP, SESSION_KEY, STREAM_SPACE, WEWEAR_CTX};
+use wp2_core::stock::{
+    APP_SECRET, AUTHKEY, CARDS_SAVE, CARDS_STORE, KV_GET, OS_SLEEP, SESSION_KEY, STREAM_SPACE, SYS_CLOCK_TICK_GET,
+    WEWEAR_CTX,
+};
 
 const READ_PAYLOAD: u32 = 0x100CC285;
 const DECRYPT: u32 = 0x101B608D;
@@ -65,7 +69,7 @@ fn frame_c(buf: *mut u8, len: u16, frame: *const u8) -> i32 {
     let f = unsafe { core::slice::from_raw_parts(frame, HEADER_LEN) };
     let c1 = u16::from_le_bytes([f[3], f[4]]);
     let c2 = u16::from_le_bytes([f[9], f[10]]);
-    if rc != 0 || c1 != 0xFFFF || !(INFO..=PING).contains(&c2) {
+    if rc != 0 || c1 != 0xFFFF || !(INFO..=PUSH).contains(&c2) {
         return rc;
     }
     let ram = stub_ram();
@@ -219,6 +223,7 @@ fn handle(ram: &mut StubRam, c2: u16, payload: &[u8], out: &mut [u8; MAX_REPLY])
             out[..3].copy_from_slice(&[Status::Ok as u8, ram.running_slot, ram.app_flags]);
             3
         }
+        Ok(Request::Push { slot, kind, data }) => push(ram, slot, kind, data, out),
     }
 }
 
@@ -290,7 +295,50 @@ unsafe fn shift(p: *mut u8, len: usize, by: usize) {
 fn drop_data(slot: u8) {
     fs::unlink(&data_path(slot, false));
     fs::unlink(&data_path(slot, true));
-    fs::unlink(&wp2_core::layout::widget_path(slot));
+    fs::unlink(&widget_path(slot));
+    fs::unlink(&blob_path(slot));
+}
+
+// Stub 8: the phone sets an app's widget record or start blob, running or not (docs/widget-push.md). The same bytes
+// again are no write; a changed record is written at most once per PUSH_EVERY_MS (each one is a NAND write).
+fn push(ram: &mut StubRam, slot: u8, kind: u8, data: &[u8], out: &mut [u8; MAX_REPLY]) -> usize {
+    let mut file: File = [0; 0x2C];
+    if fs::open(&mut file, &slot_path(slot, false), fs::READ) < 0 {
+        return status(out, Status::NoApp);
+    }
+    fs::close(&mut file);
+    let path = if kind == PUSH_WIDGET { widget_path(slot) } else { blob_path(slot) };
+    let mut old = [0u8; MSG_MAX + 1];
+    let mut n = 0;
+    if fs::open(&mut file, &path, fs::READ) >= 0 {
+        n = fs::read(&mut file, &mut old).clamp(0, old.len() as i32) as usize;
+        fs::close(&mut file);
+    }
+    if &old[..n] == data {
+        return status(out, Status::Ok); // a missing file is the empty record
+    }
+    let tick: extern "C" fn() -> u64 = unsafe { transmute(SYS_CLOCK_TICK_GET as usize) };
+    let now = tick() as u32;
+    let at = &mut ram.push_at[usize::from(slot)][usize::from(kind)];
+    let wait = push_wait(*at, now);
+    if wait > 0 {
+        out[0] = Status::Later as u8;
+        out[1..5].copy_from_slice(&wait.to_le_bytes());
+        return 5;
+    }
+    *at = now | 1; // a failed write counts too: a broken NAND is not retried every frame
+    fs::unlink(&path);
+    if !data.is_empty() {
+        if fs::open(&mut file, &path, fs::WRITE | fs::CREATE) < 0 {
+            return status(out, Status::Io);
+        }
+        let ok = fs::write(&mut file, data) == data.len() as i32;
+        if fs::close(&mut file) < 0 || !ok {
+            fs::unlink(&path);
+            return status(out, Status::Io);
+        }
+    }
+    status(out, Status::Ok)
 }
 
 // EVENT frames go out right after the reply to a host frame, from wewear_read: the thread that runs the stock

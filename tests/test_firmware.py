@@ -271,7 +271,7 @@ class FirmwareTest(unittest.TestCase):
     @skipUnless(HAVE_STOCK, "needs JX402_V1.0.0.73.bin")
     def test_stub_too_big_rejected(self):
         with self.assertRaises(ValueError):
-            firmware.patch(STOCK, fake_stub() + bytes(0x4000))
+            firmware.patch(STOCK, fake_stub() + bytes(firmware.STUB_MAX))
 
     @skipUnless(HAVE_STOCK, "needs JX402_V1.0.0.73.bin")
     def test_stub_header_checked(self):

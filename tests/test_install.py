@@ -100,6 +100,28 @@ class InstallFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await install.info(s, 2)).icon)
 
 
+class PushTest(unittest.IsolatedAsyncioTestCase):
+    def test_widget_record_as_the_sdk(self):
+        rec = install.widget_record("Weather", "21°\nSunny")
+        self.assertEqual(len(rec), 64)
+        self.assertEqual(rec[:8], b"Weather\0")
+        self.assertEqual(rec[24:35], "21°\nSunny".encode() + b"\0")
+        long = install.widget_record("é" * 20, "x" * 50)
+        self.assertEqual(long[:24], "é".encode() * 11 + bytes(2), "cut at a char boundary, NUL kept")
+        self.assertEqual(long[24:], b"x" * 39 + b"\0")
+
+    async def test_push_frame_and_later(self):
+        s = FakeSession()
+        await install.push(s, 9, install.PUSH_BLOB, b"\x01\x02")
+        self.assertEqual(s.calls, [(install.PUSH, bytes([9, 1, 1, 2]))])
+
+        class Later(FakeSession):
+            async def request(self, *a, **k):
+                return bytes([install.Status.LATER]) + (1234).to_bytes(4, "little")
+        with self.assertRaisesRegex(ValueError, "LATER, retry in 1234 ms"):
+            await install.push(Later(), 0, install.PUSH_WIDGET, b"")
+
+
 class CliTest(unittest.TestCase):
     def test_slot_arg(self):
         from wp2apps import cli

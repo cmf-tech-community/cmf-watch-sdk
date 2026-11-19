@@ -278,7 +278,8 @@ can't be read back. So the stub answers its own release:
   the app's page and widgets from the cards (the stock lays the face out again, which stops the app), then unlinks.
   Every `DELETE` now takes the slot's widgets and page off the cards. `DELETE` of the loader slot stays `BUSY` while
   it is held. Same frames, same statuses (`docs/app-guide.md`, install notes).
-- Stub 8: 16 app slots (next section).
+- Stub 8: 16 app slots (next section) and `PUSH` (`0x90A8`): the phone sets an app's widget record or start blob
+  while it does not run (`docs/widget-push.md`).
 
 ## 16 app slots (stub 8, loader of 2026-11-19, no ABI bump)
 
@@ -290,7 +291,10 @@ can't be read back. So the stub answers its own release:
 - **Files.** `/NAND:/wp2apps/<d>.pkg|.dat|.new|.wgt|.tmp` with `<d>` the slot as one hex digit, upper case:
   `0`..`9`, `A`..`F`. Slots `0..7` keep the names of older stubs, so nothing moves on the OTA.
 - **Pages.** View `0xF8 + slot`: `0xF8..0xFF` for slots 0..7 as before, `0x100..0x107` for slots 8..15 (the stock
-  view ids end at 237; `wp2apps firmware` adds 17 table entries, the stub and table take `0x3F68` of `0x4000`).
+  view ids end at 237; `wp2apps firmware` adds 17 table entries). Stub 8 with `PUSH` is `0x2F31` bytes
+  and stub + table exactly `0x4000`: the stub's flash region went from `0x3000` to `0x5000` and `STUB_MAX` from
+  `0x4000` to `0x6000` so the next change has room. Both are budgets of our own (the NOR app partition has ≈ 964 KiB
+  free after `app.bin`, `docs/recon.md`).
   The phone's `0x906D` view card carries the id as `u16` LE: `02 00 07 01` is slot 15's page.
 - **Widgets.** `0x40` with `param_id = slot + 1`, so `1..16`.
 - **Loader.** Reads the stub's release from `StubRam.stub_version` behind `version_magic = "WPSV"` (stub 8 sets both

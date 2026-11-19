@@ -329,6 +329,7 @@ mod view {
         fs::unlink(&layout::data_path(entry.slot, false));
         fs::unlink(&layout::data_path(entry.slot, true));
         fs::unlink(&layout::widget_path(entry.slot));
+        fs::unlink(&layout::blob_path(entry.slot));
         m.failed = None;
         menu::lv::delete();
         m.entries = menu::scan();

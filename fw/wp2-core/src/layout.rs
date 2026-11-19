@@ -45,6 +45,12 @@ pub fn widget_path(slot: u8) -> [u8; 24] {
     file_path(slot, b"wgt")
 }
 pub const WIDGET_REC: usize = 64;
+
+// stub 8: the blob the phone pushed for the app (PUSH, docs/widget-push.md), raw bytes, at most MSG_MAX; the loader
+// hands it to the app as its first host message when it starts
+pub fn blob_path(slot: u8) -> [u8; 24] {
+    file_path(slot, b"psh")
+}
 pub const WIDGET_TITLE: usize = 24;
 
 // not inlined: the stub has a fixed 0x3000 bytes and calls it from many places
@@ -124,6 +130,8 @@ pub struct StubRam {
     // bytes unset, so the loader trusts stub_version only behind the magic (as kick_magic)
     pub version_magic: u32,
     pub stub_version: u32,
+    // stub 8, PUSH: millis() | 1 of the last write per slot, [widget, blob]; 0 = none since boot
+    pub push_at: [[u32; 2]; SLOTS as usize],
 }
 
 pub const VERSION_MAGIC: u32 = 0x5653_5057; // "WPSV"
