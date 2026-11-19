@@ -23,7 +23,8 @@ VIEW_START_LITERALS = (0x1018BC24, 0x1018DF3C)
 VIEW_END_LITERALS = (0x1018BC28, 0x1018DF40)
 VIEW_ID = 0xF0
 # an app's own page next to the face: the same view proc, the loader starts slot `id - 0xF8` (wp2-core cards.rs)
-PAGE_VIEWS = range(0xF8, 0x100)
+# (stub 8: 16 slots, 0x100..0x107 past the stock ids, which end at 237)
+PAGE_VIEWS = range(0xF8, 0x108)
 BOOT_CALL = 0x101884FA
 STOCK_HEAP_INIT = 0x10146AA4
 BLE_CALL = 0x100D34F0

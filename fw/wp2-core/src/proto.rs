@@ -77,7 +77,7 @@ mod tests {
         assert_eq!(parse(0x90A3, &[0, 0]), Err(Status::BadRequest));
         assert_eq!(parse(0x90A3, &[0]), Ok(Request::End));
         assert_eq!(parse(0x90A6, &[]), Err(Status::BadRequest));
-        assert_eq!(parse(0x90A4, &[9]), Err(Status::BadRequest));
+        assert_eq!(parse(0x90A4, &[16]), Err(Status::BadRequest));
     }
 
     #[test]
@@ -86,7 +86,8 @@ mod tests {
         assert!(matches!(parse(MSG, &[3; 1 + MSG_MAX]), Ok(Request::Msg { slot: 3, .. })));
         assert_eq!(parse(MSG, &[3; 2 + MSG_MAX]), Err(Status::BadRequest));
         assert_eq!(parse(MSG, &[3]), Err(Status::BadRequest));
-        assert_eq!(parse(MSG, &[8, 1]), Err(Status::BadRequest));
+        assert_eq!(parse(MSG, &[16, 1]), Err(Status::BadRequest));
+        assert!(matches!(parse(MSG, &[15, 1]), Ok(Request::Msg { slot: 15, .. })));
         assert_eq!(parse(PING, &[0]), Ok(Request::Ping));
         assert_eq!(parse(0x90A6, &[0]), Err(Status::BadRequest));
     }
@@ -103,7 +104,8 @@ mod tests {
     #[test]
     fn parse_requests() {
         assert_eq!(parse(0x90A1, &[3, 0x10, 0, 0, 0, 0xEF, 0xBE, 0xAD, 0xDE]), Ok(Request::Begin { slot: 3, size: 16, crc: 0xDEADBEEF }));
-        assert_eq!(parse(0x90A1, &[8, 0, 0, 0, 0, 0, 0, 0, 0]), Err(Status::BadRequest));
+        assert_eq!(parse(0x90A1, &[16, 0, 0, 0, 0, 0, 0, 0, 0]), Err(Status::BadRequest));
+        assert!(matches!(parse(0x90A1, &[15, 0, 0, 0, 0, 0, 0, 0, 0]), Ok(Request::Begin { slot: 15, .. })));
         assert_eq!(parse(0x90A2, &[0; 4 + 129]), Err(Status::BadRequest));
         assert_eq!(parse(0x90A4, &[0xFF]), Ok(Request::Delete(0xFF)));
     }

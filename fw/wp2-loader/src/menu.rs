@@ -58,7 +58,8 @@ pub fn scan() -> [Option<Entry>; ROWS] {
     let mut found: [(Option<Entry>, *mut u8); ROWS] = [(None, core::ptr::null_mut()); ROWS];
     let mut n = 0;
     let mut file: fs::File = [0; 0x2C];
-    for slot in 0..SLOTS {
+    // a stub before 8 takes slots 0..7 only: 8.pkg..F.pkg left by a newer stub are not its apps
+    for slot in 0..wp2_core::layout::stub_ram().slots() {
         if fs::open(&mut file, &slot_path(slot, false), fs::READ) < 0 {
             continue;
         }

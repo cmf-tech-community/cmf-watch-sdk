@@ -114,13 +114,13 @@ def slot_arg(text):
     if text.upper() == "L":
         return install.LOADER_SLOT
     if not text.isdigit() or int(text) >= install.SLOTS:
-        raise argparse.ArgumentTypeError("slot must be 0..7 or L")
+        raise argparse.ArgumentTypeError("slot must be 0..15 (8..15 from stub 8) or L")
     return int(text)
 
 
 def app_slot_arg(text):
     if not text.isdigit() or int(text) >= install.SLOTS:
-        raise argparse.ArgumentTypeError("slot must be 0..7")
+        raise argparse.ArgumentTypeError("slot must be 0..15 (8..15 from stub 8)")
     return int(text)
 
 
@@ -176,7 +176,8 @@ def cmd_remove(args):
 
 def cmd_list(args):
     async def both(s):
-        return await install.stub(s), await install.listing(s)
+        stub = await install.stub(s)
+        return stub, await install.listing(s, install.slots(stub))
 
     stub, found = asyncio.run(with_watch(args, both))
     print(json.dumps({"stub": {"version": stub.version, "abi_minor": stub.abi_minor}, "slots": {slot_name(n): {"name": h.name, "version": h.version, "kind": h.kind,

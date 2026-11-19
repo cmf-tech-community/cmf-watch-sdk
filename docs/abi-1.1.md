@@ -53,7 +53,7 @@ non-zero.
 
 | Opcode | Direction | Plaintext | Reply |
 |---|---|---|---|
-| `0x90A5` MSG | host → app | `slot: u8` (`0..7`, or `0xFF` = whatever runs), `data[1..=128]` | `0xB0A5`: `status: u8` |
+| `0x90A5` MSG | host → app | `slot: u8` (`0..7`, `0..15` from stub 8, or `0xFF` = whatever runs), `data[1..=128]` | `0xB0A5`: `status: u8` |
 | `0xB0A6` EVENT | app → host, after the reply to any host frame | `seq: u8`, `slot: u8`, `data[1..=128]` | none |
 | `0x90A7` PING | host → stub | one dummy byte | `0xB0A7`: `0`, `running_slot`, `app_flags` |
 

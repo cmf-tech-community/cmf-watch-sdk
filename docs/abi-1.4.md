@@ -278,3 +278,33 @@ can't be read back. So the stub answers its own release:
   the app's page and widgets from the cards (the stock lays the face out again, which stops the app), then unlinks.
   Every `DELETE` now takes the slot's widgets and page off the cards. `DELETE` of the loader slot stays `BUSY` while
   it is held. Same frames, same statuses (`docs/app-guide.md`, install notes).
+- Stub 8: 16 app slots (next section).
+
+## 16 app slots (stub 8, loader of 2026-11-19, no ABI bump)
+
+- **Which stub takes which slots.** `INFO` (`0x90A0`), `BEGIN` (`0x90A1`), `DELETE` (`0x90A4`) and `MSG` (`0x90A5`)
+  accept app slots `0..15` from **stub 8** on. Stub 7 and older take `0..7` and answer `BadRequest` (1) for
+  `8..15`. The host reads the stub version first (`INFO` slot `0xFE`, section above): `>= 8` → 16 slots, else 8.
+  Listing = `INFO` for `0..count-1` and `0xFF`; a new app goes to the slot of the same name, else the first free one
+  below `count` (`install.slots`, `install.install`). Slot numbers stay bytes; `0xFE`/`0xFF` keep their meaning.
+- **Files.** `/NAND:/wp2apps/<d>.pkg|.dat|.new|.wgt|.tmp` with `<d>` the slot as one hex digit, upper case:
+  `0`..`9`, `A`..`F`. Slots `0..7` keep the names of older stubs, so nothing moves on the OTA.
+- **Pages.** View `0xF8 + slot`: `0xF8..0xFF` for slots 0..7 as before, `0x100..0x107` for slots 8..15 (the stock
+  view ids end at 237; `wp2apps firmware` adds 17 table entries, the stub and table take `0x3F68` of `0x4000`).
+  The phone's `0x906D` view card carries the id as `u16` LE: `02 00 07 01` is slot 15's page.
+- **Widgets.** `0x40` with `param_id = slot + 1`, so `1..16`.
+- **Loader.** Reads the stub's release from `StubRam.stub_version` behind `version_magic = "WPSV"` (stub 8 sets both
+  at boot; older stubs leave the bytes unset) and lists slots `0..15` on stub 8, `0..7` on stub 7 and older. A loader
+  from before 2026-11-19 lists `0..7` on any stub: install the new loader with the OTA, or apps in `8..15` stay
+  out of the menu (they still answer `INFO` and can be removed).
+- **NAND space.** A package is at most `64 + 2 × 128 KiB` (`BEGIN` limit), in practice image + relocations ≈ the
+  image: 16 × 128 KiB = 2 MiB, plus per slot `.dat` 4 KiB (+ `.new` 4 KiB during a save) and a 64 B `.wgt`, each
+  at least one 2 KiB cluster, plus the loader (64 KiB) and one `.tmp` during an install: ≈ 2.4 MiB with full-size
+  apps, ≈ 4.4 MiB in the theoretical worst case. The emulator's `/NAND:` (Zephyr `statvfs` through the mount API
+  `+0x44`, `tests/test_slots16_e2e.py`) is a 9.75 MiB FAT, 2 KiB clusters: 9.69 MiB free with the loader, 9.19 MiB
+  after 15 × 33 KiB + 2 KiB apps. That is the emulator's NAND fixture; the real watch was not measured (read-only
+  AT has no free-space query known to us), so check `statvfs` there before relying on it.
+- **RES heap.** The menu with 15 icons (27.7 KiB each) open: 4.6 MiB of `ResFbHeap` free, lowest ever 1.5 MiB
+  (emulator). An icon that does not fit falls back to the letter (`heap::alloc` checks first).
+- **Order of updates.** OTA first (stub 8), then the loader; until the OTA the phone sees 8 slots and installs only
+  there. Downgrading the stub leaves `8.pkg`..`F.pkg` on NAND unseen: remove them before.

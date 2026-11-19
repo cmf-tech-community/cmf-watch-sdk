@@ -1,7 +1,9 @@
 use crate::chan::Ring;
 
 pub const VIEW_ID: u16 = 0xF0;
-pub const SLOTS: u8 = 8;
+// stub 8: 16 slots, 0..F. A stub before 8 takes slots 0..7 only (`slots`).
+pub const SLOTS: u8 = 16;
+pub const SLOTS_OLD: u8 = 8;
 pub const LOADER_SLOT: u8 = 0xFF;
 pub const LOADER_ABI_MINOR: u16 = 3;
 // the stub's own release, bumped with every stub change that goes out by OTA. A host reads it with INFO for
@@ -11,7 +13,10 @@ pub const LOADER_ABI_MINOR: u16 = 3;
 // 3 = the Apps widget in wgt_reg slot 0x40 (docs/recon.md, "Widget cards")
 // 4 = app widgets: 0x40 with param_id slot + 1 shows the app's record and launches it on a tap
 // 5 = app pages: views 0xF8 + slot run the loader too, which starts that app (cards.rs)
-pub const STUB_VERSION: u32 = 7;
+// 6 = installs into the loader or a page's app while the page is behind the face
+// 7 = DELETE of a page's app behind the face takes its page and widgets off the cards
+// 8 = 16 app slots (8..15 in files 8.pkg, 9.pkg, A.pkg..F.pkg, pages 0x100..0x107); StubRam.stub_version
+pub const STUB_VERSION: u32 = 8;
 // INFO for this slot answers the stub's version instead of a package header; an older stub answers BadRequest
 pub const STUB_SLOT: u8 = 0xFE;
 pub const STUB_RAM: u32 = 0x3871_EEC0;
@@ -46,7 +51,8 @@ pub const WIDGET_TITLE: usize = 24;
 #[inline(never)]
 fn file_path(slot: u8, ext: &[u8; 3]) -> [u8; 24] {
     let mut path = [0u8; 24];
-    let name = if slot == LOADER_SLOT { b'L' } else { b'0' + slot % 10 };
+    // hex: 0..7 keep the names of stubs before 8
+    let name = if slot == LOADER_SLOT { b'L' } else { b"0123456789ABCDEF"[usize::from(slot & 15)] };
     let dir = &DIR[..DIR.len() - 1];
     path[..dir.len()].copy_from_slice(dir);
     path[dir.len()] = b'/';
@@ -114,6 +120,24 @@ pub struct StubRam {
     pub loader_focus: u8,
     // stub 6: such an install landed; the page's next FOCUS loads the loader again from NAND (view.rs)
     pub reload: u8,
+    // stub 8: VERSION_MAGIC when stub_version is set. An older stub zeroes only its shorter StubRam and leaves these
+    // bytes unset, so the loader trusts stub_version only behind the magic (as kick_magic)
+    pub version_magic: u32,
+    pub stub_version: u32,
+}
+
+pub const VERSION_MAGIC: u32 = 0x5653_5057; // "WPSV"
+
+impl StubRam {
+    // the stub's release as the loader sees it; 0 for any stub before the field (7 and older, all with 8 slots)
+    pub fn version(&self) -> u32 {
+        if self.version_magic == VERSION_MAGIC { self.stub_version } else { 0 }
+    }
+
+    // app slots the running stub installs and loads
+    pub fn slots(&self) -> u8 {
+        if self.version() >= 8 { SLOTS } else { SLOTS_OLD }
+    }
 }
 
 pub const KICK_MAGIC: u32 = 0x4B43_494B; // "KICK"
@@ -152,6 +176,17 @@ mod tests {
     }
 
     #[test]
+    fn slots_by_stub_version() {
+        let mut ram: StubRam = unsafe { core::mem::zeroed() };
+        ram.stub_version = 8; // garbage without the magic: an older stub
+        assert_eq!((ram.version(), ram.slots()), (0, 8));
+        ram.version_magic = VERSION_MAGIC;
+        assert_eq!((ram.version(), ram.slots()), (8, 16));
+        ram.stub_version = 7;
+        assert_eq!(ram.slots(), 8);
+    }
+
+    #[test]
     fn slot_paths() {
         assert_eq!(&slot_path(LOADER_SLOT, false)[..21], b"/NAND:/wp2apps/L.pkg\0");
         assert_eq!(&slot_path(3, true)[..21], b"/NAND:/wp2apps/3.tmp\0");
@@ -160,5 +195,8 @@ mod tests {
         assert_eq!(&data_path(2, false)[..21], b"/NAND:/wp2apps/2.dat\0");
         assert_eq!(&data_path(2, true)[..21], b"/NAND:/wp2apps/2.new\0");
         assert_eq!(&widget_path(7)[..21], b"/NAND:/wp2apps/7.wgt\0");
+        assert_eq!(&slot_path(9, false)[..21], b"/NAND:/wp2apps/9.pkg\0");
+        assert_eq!(&slot_path(10, false)[..21], b"/NAND:/wp2apps/A.pkg\0");
+        assert_eq!(&data_path(15, true)[..21], b"/NAND:/wp2apps/F.new\0");
     }
 }

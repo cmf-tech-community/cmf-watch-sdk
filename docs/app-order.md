@@ -24,8 +24,8 @@ bytes `WP2ORDER` (`57 50 32 4F 52 44 45 52`). The 384 bytes after it are the tab
 - Field `i` is the package name of the app for row `i`, exactly as in that app's package header at offset `0x08`
   (UTF-8, 1..23 bytes, padded with `00` to 24 bytes). Byte-exact compare, case-sensitive. The phone gets the names
   from `INFO` (header bytes `0x08..0x20`) or from the packages it installed.
-- The first field that starts with `00` ends the list; fill all fields after it with `00`. At most 16 names (8 slots
-  today; 16 is room for more slots).
+- The first field that starts with `00` ends the list; fill all fields after it with `00`. At most 16 names: one per
+  slot on stub 8 (16 slots), 8 slots before it.
 - Names that are not installed are skipped. Installed apps not in the list follow, in slot order. A name listed
   twice counts at its first place. All fields zero = slot order (the shipped loader).
 - The table holds no relocations: `wp2apps order` refuses a loader where it would.
