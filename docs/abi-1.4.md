@@ -158,6 +158,97 @@ that return off while an app runs, as the stock does for its own workout views (
 face"). No ABI change. Since the stop on a dark panel the measurement no longer holds the watch out of deep sleep;
 the return stays held anyway.
 
+## GPS (loader of 2026-11-19, no ABI bump)
+
+The watch's own GPS for an app, as the stock outdoor workouts use it. Stock side: `docs/recon.md`, "GPS". Emulator
+proof: `tests/test_gps_e2e.py` (app `sdk/examples/gps-probe`, a canvas app) with the emulator's NMEA model and a
+synthetic position. Not yet on hardware.
+
+**Loader only.** Same path as heart rate: a SENSOR record and a new record on `lv_submit`, which the table has
+since 1.2. `ABI_MINOR` stays 3, the stub does not change (no stub 9, no OTA): install the new loader, then the app.
+An older loader answers `-22` (op `0x18` and SENSOR value 2 are unknown there). No package flag: the loader needs
+nothing at launch, the app asks at run time and the loader turns it off on every way out.
+
+### The calls
+
+SDK: `Api::gps(&self, on: bool) -> i32`, `Api::gps_fix(&self) -> Option<GpsFix>`, event kind `GPS` = 11.
+
+- `gps(true)`: the loader sets ux2sys `0x63` to **1** (the stock workouts' mode) from its UI tick and queues
+  `Event { kind: GPS, x: fix quality, y: satellites }` once per 1000 ms (`wp2_core::gps::EMIT_MS`) while the app runs
+  in the foreground, the panel dark included (handed out from `next_event`, as HEART). `x` 0 = no fix yet.
+- `gps_fix()`: the latest fix, read from the stock parser's block when called:
+
+  | Field | Unit | Source |
+  |---|---|---|
+  | `lat_e7`, `lon_e7` | 1e-7 degrees, rounded | GGA, f64 in the stock |
+  | `alt_dm` | decimetres above mean sea level | GGA altitude (f32 m) |
+  | `ms` | the loader's `millis` at the read | loader |
+  | `fix` | GGA fix quality: 0 none, 1 GPS, 2 DGPS | GGA |
+  | `sats` | satellites in use | GGA |
+  | `ttff_s` | seconds from the start to the first fix, 0 before it | stock |
+
+  **No speed, course or accuracy**: the stock parses only GGA (and GSV SNRs); RMC is dropped, HDOP is read and not
+  kept. An app derives speed and course from successive fixes (`gps-probe` does speed). `None` while the app has not
+  asked for the GPS, and on an older loader.
+- `gps(false)` turns it off and queues one GPS event with `x` 0. Returns 0, or `-22` on an older loader.
+- The loader turns the GPS off (mode 0) on exit, crash, force stop, view delete and `PAUSE`, and on again on
+  `RESUME`. A new launch starts with it off. One start per hold, one stop at its end (`wp2_core::gps::Hold`, the
+  heart rate's rule).
+- **A GPS the stock already runs is only read.** The stock keeps no request count for the GPS: one mode, and any
+  `0` powers the receiver down (`docs/recon.md`, "GPS", Ownership). If the mode in force (`0x380443F5`) is non-zero
+  when the app asks, the loader never writes `0x63` for that hold, so an app cannot cut a stock workout's GPS. In
+  the other direction a stock workout cannot start while the app is in the foreground; on `PAUSE` the loader has
+  already turned its own GPS off.
+
+### Wire format
+
+- SENSOR record `[0x13, 2, 0, 0, 2, on]` (sensor 2 = GPS; `cmf_wp2_app::GPS_ON`, `GPS_OFF`).
+- GPS_FIX record `[0x18, 20, 0, 0, <20 bytes>]`, alone in a batch, in the app block (a `static mut`): the loader
+  overwrites the 20 payload bytes with `lat_e7 i32, lon_e7 i32, alt_dm i32, ms u32, fix u8, sats u8, ttff_s u16`
+  (LE) and returns 0, or `-1` while the app holds no GPS. The stock block is cleared and refilled at every GGA on
+  `gps_service`; the loader copies it until two copies agree (`fw/wp2-loader/src/gps.rs`).
+
+### Privacy and battery
+
+- Positions are personal data: apps and tests never log or send them unasked; the loader never logs them; the e2e
+  test uses a synthetic position. `gps-probe` shows them rounded to 0.001° (about 100 m).
+- **The stock stores a track point every ~5 s while the GPS has a fix, workout or not** (`record_gps_data`, the
+  stock GPS store that `sport_gps_data_sync` hands to the phone). An app's GPS session leaves points there, as a
+  stock workout's does. Whether Nothing X shows or uploads points outside a workout is not known: the real-watch
+  check below looks for it.
+- The receiver is powered while an app holds it: ask only while the position is shown or recorded. The draw was not
+  measured; the plan below measures it.
+
+### First real-watch check (plan, not run)
+
+The owner decides when, and runs it. Order: install the loader of 2026-11-19 and `gps-probe` (phone or
+`wp2apps install`), nothing else changes on the watch.
+
+1. **Baseline, no app.** Outdoors, open sky. Stock Outdoor run: note the seconds from opening the sport list until
+   the GO screen shows a GPS fix. End the workout. Charge to 100 %.
+2. **Time to first fix.** Leave the watch indoors ≥ 2 h (cold-ish start), go outdoors, open `gps-probe`, wait for
+   `FIX n SAT TTFF s`; note `s` (`ttff_s`). Repeat warm (exit,
+   reopen within 1 min) and after 30 min off. Do it once with the phone linked (aiding over BLE,
+   `auxiliary_gps_request`) and once with Bluetooth off on the phone.
+3. **Fix rate and quality.** Walk 10 min: the event rate (one per second expected), satellites, that the rounded
+   position follows the walk, that the speed reads walking pace (4–6 km/h). Coordinates stay on the watch: report
+   counts and rates, not positions.
+4. **Battery per hour.** From 100 %, `gps-probe` open outdoors with a fix, panel on its own timeout, for 60 min;
+   note the percent drop (`wp2apps info` or the watch) and compare with 60 min of the stock Outdoor run (step 1 day,
+   same conditions) and with 60 min idle. Expect the app ≈ the stock workout minus its heart rate.
+5. **Turned off afterwards.** Exit `gps-probe` with the button, then 30 min idle
+   and compare the drop with idle (a receiver left on shows as several percent). Optional read-only check: `AT
+   GETGPSSNR` after exit should report 0 satellites.
+6. **Stock still gets GPS.** Right after the app's exit: stock Outdoor run, check the GO screen gets a fix and the
+   workout records a track (Nothing X after sync). Also the other order: start the stock Outdoor run, go back to the
+   face with the workout running, open `gps-probe` (it reads the workout's fix), exit it, and check the workout's track
+   has no gap after that moment.
+7. **The stock track store.** After step 3, sync with Nothing X and look for a stray track or points at the time of
+   the app session outside any workout. If they show up, the API needs a note (or a different mode) before apps use
+   it.
+
+Abort criteria: the watch reboots, the GPS stays on after exit (step 5), or the stock workout loses its fix (step 6).
+
 ## Pager (loader of 2026-11-14, no ABI bump)
 
 A vertical pager of full-screen pages, the stock `lv_tileview` (entries: `docs/recon-lvgl.md`, `lv_tileview`).

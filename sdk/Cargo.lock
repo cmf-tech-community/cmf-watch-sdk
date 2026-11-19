@@ -38,6 +38,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gps-probe"
+version = "0.1.0"
+dependencies = [
+ "cmf-wp2-app",
+]
+
+[[package]]
 name = "hello"
 version = "0.1.0"
 dependencies = [

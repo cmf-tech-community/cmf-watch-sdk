@@ -319,6 +319,7 @@ have ~5 ms granularity (`next_event` in `fw/wp2-loader/src/app.rs`). Never spin 
 | `RESUME` (6) | the popup closed | The loader repaints the whole framebuffer itself. Redraw time-dependent parts; ask the host for a fresh snapshot |
 | `MESSAGE` (7) | ABI 1.1: a host message is in the inbox | `x` = its length. A hint: drain with `recv` until `None` |
 | `HEART` (9) | about once a second after `heart_rate(true)` (loader of 2026-11-14) | `delta` = bpm, 0 = no reading yet or off the wrist; `x` = 1 on the wrist. Personal data: never log it |
+| `GPS` (11) | about once a second after `gps(true)` (loader of 2026-11-19) | `x` = fix quality (0 = no fix yet), `y` = satellites; the position comes from `gps_fix()`. Personal data: never log it |
 
 - The queue holds 15 events; more are dropped (`fw/wp2-core/src/events.rs`).
 - **An app can end without any event.** Closing the "Paired" popup jumps to the clock and deletes the view. All of
@@ -387,6 +388,8 @@ One blob of at most `STORE_MAX = 4096` bytes per slot, in `/NAND:/wp2apps/<slot>
 | `media_key(cmd: u8) -> i32` | `-22` | Phone music: `MEDIA_PLAY`, `MEDIA_PAUSE`, `MEDIA_PREV`, `MEDIA_NEXT`. `0`, `-19` with no phone link or media (`docs/abi-1.4.md`, "Music") |
 | `media_bind(title: Option<lv::Obj>, artist: Option<lv::Obj>) -> i32` | `-22` | The loader writes the phone's track into these labels once a second and sends `MEDIA` (`x` playing, `y` available) at the bind and on change; `media_unbind()` stops it. Unbind before deleting the labels |
 | `heart_rate(on: bool) -> i32` | `0`, `-22` on an older loader | Starts or stops the stock heart-rate measurement for `HEART` events. Held only while the app runs and is not paused; stopped on pause, exit, crash, force stop and view delete; started again on resume. Costs battery (the PPG LED). Works in canvas and LVGL apps; `docs/abi-1.4.md`, "Heart rate" |
+| `gps(on: bool) -> i32` | `0`, `-22` on an older loader | Turns the watch's GPS on or off for `GPS` events, with the same lifecycle as `heart_rate` (off on pause, exit, crash, force stop; a GPS a stock workout runs is only read). Costs battery; the stock also stores its own track points while it has a fix; `docs/abi-1.4.md`, "GPS" |
+| `gps_fix() -> Option<GpsFix>` | the latest fix, `None` without `gps(true)` or on an older loader | `lat_e7`, `lon_e7` (1e-7°), `alt_dm`, `fix`, `sats`, `ttff_s`, `ms`. No speed or course: derive them from successive fixes (`sdk/examples/gps-probe`) |
 | `keep_screen_on(on: bool)` | – | Records the wish; the next UI tick takes or drops the stock wake lock. Held only while the app runs and is not paused; dropped on pause, exit, crash, force stop and view delete; taken again on resume. Costs display power: hold it with a deadline (herdr-agents: 20 s after a buzz) |
 
 ### Widget (card left of the watch face)
@@ -777,8 +780,8 @@ loop {
 | LVGL with a framebuffer fallback (simulator); a growing log, newest on top, oldest deleted | `api-demo/src/main.rs`, `log.rs` |
 | Text into a buffer with `core::fmt::Write` | `Buf<N>` in `api-demo/src/main.rs` |
 
-Missing today: bitmaps (only `rect`; the icon path is loader-only), touch move, gestures and long press, any sensor
-(accelerometer, heart rate and GPS were looked at and not shipped, `docs/abi-1.1.md`), a notice before the screen
+Missing today: bitmaps (only `rect`; the icon path is loader-only), touch move, gestures and long press, the accelerometer
+(looked at and not shipped, `docs/abi-1.1.md`; heart rate and GPS ship as `heart_rate` and `gps`), a notice before the screen
 blanks, a random source and a phone-side host. In the kit: rounded arc caps, a scroll bar widget, and a ring that
 repaints only the changed sector.
 

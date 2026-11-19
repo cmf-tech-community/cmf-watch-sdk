@@ -193,6 +193,14 @@ pub const HR_WEAR: u32 = 0x3804_B30C;
 pub const HR_OWNER: u32 = 0x3804_B30F;
 // u8 latest bpm, 0 = none; hr_callback type 5 (0x100E337A) writes it, the heart view clears it at start
 pub const HR_BPM: u32 = 0x3804_B310;
+// GPS (docs/recon.md, "GPS"). ux2sys 0x63 = GPS mode (u32: 0 off, 1 the workouts' normal mode, 4 and 5 other
+// constellation sets); its setter 0x101B9B4E posts to gps_service, which powers the AG3352 on or off.
+pub const PROP_GPS_MODE: u32 = 0x63;
+// gps_service state: u8 [1] = mode in force (0 = off). Non-zero before the app's start = the stock owns the GPS.
+pub const GPS_STATE: u32 = 0x3804_43F4;
+// the NMEA parser's info block (f64 lat +0x38, f64 lon +0x40, f32 altitude m +0x48, u32 fix quality +0x4C,
+// u32 satellites +0x50, u32 time to first fix s +0x54); cleared and refilled at every GGA, zeroed at mode 0.
+pub const GPS_INFO: u32 = 0x3801_6C40;
 // The launcher's "return to watch face" (docs/recon.md, "Return to watch face"): u32 callback at RETURN_CB, set to
 // RETURN_CLOCK at launch; late-resume calls it when the panel was dark for ux2sys 0x9C seconds, unless it is 0.
 pub const RETURN_CB: u32 = 0x3801_9B10;

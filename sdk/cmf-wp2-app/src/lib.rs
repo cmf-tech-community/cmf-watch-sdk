@@ -28,6 +28,9 @@ pub const HEART: u8 = 9;
 /// Phone music state after [`Api::media_bind`], once at the bind and on every change: `x` = 1 playing, `y` = 1 the
 /// phone is linked and has media to control (loader of 2026-11-16).
 pub const MEDIA: u8 = 10;
+/// GPS, about once a second after [`Api::gps`]`(true)`: `x` = fix quality (0 = no fix yet, 1 = GPS fix, 2 =
+/// differential), `y` = satellites in use. Read the position with [`Api::gps_fix`] (loader of 2026-11-19).
+pub const GPS: u8 = 11;
 
 /// [`Api::media_key`] commands, as the stock music controls send them. No volume.
 pub const MEDIA_PLAY: u8 = 1;
@@ -40,6 +43,47 @@ pub const MEDIA_NEXT: u8 = 4;
 pub static HEART_ON: &[u8] = &[0x13, 2, 0, 0, 1, 1];
 #[doc(hidden)]
 pub static HEART_OFF: &[u8] = &[0x13, 2, 0, 0, 1, 0];
+#[doc(hidden)]
+pub static GPS_ON: &[u8] = &[0x13, 2, 0, 0, 2, 1];
+#[doc(hidden)]
+pub static GPS_OFF: &[u8] = &[0x13, 2, 0, 0, 2, 0];
+#[doc(hidden)]
+pub const GPS_FIX_LEN: usize = 20;
+
+/// The latest GPS fix as the watch parsed it (docs/abi-1.4.md, "GPS"). Personal data: show it, record it on the
+/// watch if the user asked for that, but never log it or send it unasked.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GpsFix {
+    /// Latitude and longitude in 1e-7 degrees (north and east positive); 0 without a fix.
+    pub lat_e7: i32,
+    pub lon_e7: i32,
+    /// Altitude above mean sea level in decimetres, as the receiver's GGA gives it.
+    pub alt_dm: i32,
+    /// `Api.millis` clock when the loader read it.
+    pub ms: u32,
+    /// GGA fix quality: 0 no fix, 1 GPS, 2 differential.
+    pub fix: u8,
+    /// Satellites in use.
+    pub sats: u8,
+    /// Seconds from the GPS start to its first fix, 0 until then.
+    pub ttff_s: u16,
+}
+
+impl GpsFix {
+    #[doc(hidden)]
+    pub fn from_bytes(b: &[u8; GPS_FIX_LEN]) -> GpsFix {
+        let i = |o: usize| i32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+        GpsFix {
+            lat_e7: i(0),
+            lon_e7: i(4),
+            alt_dm: i(8),
+            ms: i(12) as u32,
+            fix: b[16],
+            sats: b[17],
+            ttff_s: u16::from_le_bytes([b[18], b[19]]),
+        }
+    }
+}
 
 /// Longest message in either direction.
 pub const MSG_MAX: usize = 128;
@@ -199,6 +243,37 @@ impl Api {
         }
         let r = if on { HEART_ON } else { HEART_OFF };
         (self.lv_submit)(r.as_ptr(), r.len())
+    }
+
+    /// Turns the watch's GPS on (`true`) or off for this app; while it runs in the foreground a [`GPS`] event comes
+    /// about once a second, and [`Api::gps_fix`] reads the position. The loader turns the GPS off on exit, crash,
+    /// force stop and `PAUSE`, and on again on `RESUME`; a new launch starts with it off. A GPS a stock workout
+    /// already runs is only read, never turned off. Costs battery (the receiver is on): ask only while the position
+    /// is shown or recorded. The stock also stores a point of its own every few seconds while the GPS has a fix
+    /// (docs/abi-1.4.md, "GPS"). `0`, or `-22` on a loader older than 2026-11-19 (ABI 1.3, no `abi_minor` change).
+    pub fn gps(&self, on: bool) -> i32 {
+        if self.abi_minor < 2 {
+            return -22;
+        }
+        let r = if on { GPS_ON } else { GPS_OFF };
+        (self.lv_submit)(r.as_ptr(), r.len())
+    }
+
+    /// The latest fix after [`Api::gps`]`(true)`; `fix` 0 until the receiver has one. `None` while the app has not
+    /// asked for the GPS, and on a loader older than 2026-11-19.
+    pub fn gps_fix(&self) -> Option<GpsFix> {
+        if self.abi_minor < 2 {
+            return None;
+        }
+        // lv_submit takes only buffers inside the app block: a static, not the stack; the loader fills the payload
+        static mut BUF: [u8; 4 + GPS_FIX_LEN] = [0; 4 + GPS_FIX_LEN];
+        let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
+        buf[..4].copy_from_slice(&[0x18, GPS_FIX_LEN as u8, 0, 0]);
+        if (self.lv_submit)(buf.as_ptr(), buf.len()) != 0 {
+            return None;
+        }
+        let b = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(BUF)) };
+        Some(GpsFix::from_bytes(b[4..].try_into().unwrap()))
     }
 
     /// Sends a music command to the phone ([`MEDIA_PLAY`], [`MEDIA_PAUSE`], [`MEDIA_PREV`], [`MEDIA_NEXT`]), as the
