@@ -72,13 +72,6 @@ class GpsTest(unittest.TestCase):
             emu.send("t 1 233 233", "t 0 233 233", pause=3)  # on again
             self.assertEqual(self.mode(emu), 1)
 
-            harness.popup(emu)  # PAUSE
-            emu.sleep(2)
-            self.assertEqual(self.mode(emu), 0, "off while paused")
-            harness.close_popup(emu)  # RESUME
-            emu.sleep(2)
-            self.assertEqual(self.mode(emu), 1, "on again after resume")
-
             emu.send("r -80", pause=3)  # the app panics
             self.assertFalse(self.running(emu))
             self.assertEqual(self.mode(emu), 0, "off after the crash")
@@ -88,12 +81,23 @@ class GpsTest(unittest.TestCase):
             self.assertEqual(self.mode(emu), 1)
             mark = len(emu.uart())
             emu.send("c 1", "c 0", pause=3)  # BUTTON: the app returns
-            if self.running(emu):  # the panel had gone dark (a loaded host): that press only woke it
+            if self.running(emu):  # a loaded host let the panel go dark: that press only woke it
                 emu.send("c 1", "c 0", pause=3)
             self.assertFalse(self.running(emu))
             emu.sleep(2)
             self.assertEqual(self.mode(emu), 0, "off after exit")
             self.assertIn("gps_disable ok", emu.uart()[mark:], "the receiver was powered down")
+
+            # last: the charge popup that pauses stays plugged and comes back at every wake
+            tap_row(emu, 0)
+            emu.sleep(3)
+            self.assertEqual(self.mode(emu), 1)
+            harness.popup(emu)  # PAUSE
+            emu.sleep(2)
+            self.assertEqual(self.mode(emu), 0, "off while paused")
+            harness.close_popup(emu)  # RESUME
+            emu.sleep(2)
+            self.assertEqual(self.mode(emu), 1, "on again after resume")
             uart = emu.uart()
             self.assertNotIn("ZEPHYR FATAL ERROR", uart)
             self.assertEqual(uart.count("*** Booting Zephyr"), 1, "guest rebooted")
