@@ -35,6 +35,12 @@ def cmd_info(args):
     }, indent=2))
 
 
+def cmd_order(args):
+    data = package.set_order(args.loader.read_bytes(), args.names)
+    with args.output.open("xb") as out:
+        out.write(data)
+
+
 def cmd_firmware(args):
     if args.motor_only and args.stub:
         raise ValueError("--motor-only takes no --stub")
@@ -288,6 +294,12 @@ def parser():
     info = commands.add_parser("info", help="Validate a package and print its header")
     info.add_argument("package", type=Path)
     info.set_defaults(handler=cmd_info)
+    order = commands.add_parser("order", help="Loader package with this Apps menu order (docs/app-order.md); "
+                                "install it like any loader")
+    order.add_argument("loader", type=Path)
+    order.add_argument("names", nargs="*", help="package names, first row first; empty: slot order")
+    order.add_argument("--output", type=Path, required=True)
+    order.set_defaults(handler=cmd_order)
     fw = commands.add_parser("firmware", help="Patch the stock app.bin (heap reservation, stub, motor strength, weak vibration level)")
     fw.add_argument("--stub", type=Path)
     fw.add_argument("--motor", type=int, default=1000, metavar="PERMILLE",

@@ -66,6 +66,11 @@ The app on the watch side needs nothing new: `send`/`recv` as in `docs/app-guide
 - A stock host still polls with `PING`. A `K` host may poll too, but does not have to: 40 messages in a burst
   arrived without a host frame, none lost, `seq` contiguous (emulator).
 
+## App order in the menu (loader of 2026-11-19, no ABI bump)
+
+The phone sets the order of the Apps menu by installing a loader package with a `WP2ORDER` table: no new command,
+any stub. Contract: `docs/app-order.md`.
+
 ## Install order
 
 New stub (OTA, `docs/ota.md`) and new loader (`wp2apps install target/loader.wp2app`). Each works with the other's

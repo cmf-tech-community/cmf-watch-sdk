@@ -210,7 +210,8 @@ uv run --locked wp2apps install target/<name>.wp2app --address <UUID>
 - `install`, `list` and `remove` do a full bind, and the stock then shows a "Paired" popup. Close it with the
   button. If an app was running, closing that popup ends it (section 4).
 - Open an app: stock app list (list style, not waterfall) → "Custom Apps", the first row → tap the app's row (the
-  crown scrolls the list). The row shows the name and `vN`. If `main` returns a non-zero code, the row shows
+  crown scrolls the list). The row shows the name and `vN`. Rows come in the order the phone set, then the other
+  apps in slot order (`docs/app-order.md`). If `main` returns a non-zero code, the row shows
   `Error <code>` for 2 s (`fw/wp2-loader/src/main.rs`, `fail`).
 - Remove on the watch: a long press on the app's row asks "Delete" / "Cancel" with its name; Delete removes the
   package and its data (as `wp2apps remove`) and the list is built again (loader of 2026-11-14,

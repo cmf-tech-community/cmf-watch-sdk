@@ -21,11 +21,41 @@ pub fn entry(slot: u8, raw: &[u8; HEADER_SIZE]) -> Option<Entry> {
     Some(Entry { slot, name: h.name, len, version: h.version, size: h.image_size, features: 0 })
 }
 
-// Entries are packed from index 0; row i shows entries[i].
+// The phone's app order (docs/app-order.md): package name fields, NUL-padded as in the header; the first all-zero
+// field ends the list. It lives in the loader image behind ORDER_MAGIC: the phone patches it into the loader
+// package and installs that, so it needs no stub change and survives reboots.
+pub const ORDER_MAX: usize = 16;
+pub const ORDER_MAGIC: &[u8; 8] = b"WP2ORDER";
+pub type Order = [[u8; 24]; ORDER_MAX];
+
+#[repr(C)]
+pub struct OrderTable {
+    pub magic: [u8; 8],
+    pub names: Order,
+}
+
+#[cfg(target_os = "none")]
+#[used]
+#[unsafe(no_mangle)]
+static WP2_ORDER: OrderTable = OrderTable { magic: *ORDER_MAGIC, names: [[0; 24]; ORDER_MAX] };
+
+// black_box: the compiler would fold the all-zero initializer the phone overwrites
+#[cfg(target_os = "none")]
+fn order() -> &'static Order {
+    core::hint::black_box(&WP2_ORDER.names)
+}
+
+// the row key: the name's place in `order`, apps not in it after all of those; then the slot
+pub fn rank(e: &Entry, order: &Order) -> (usize, u8) {
+    let listed = order.iter().take_while(|n| n[0] != 0);
+    (listed.clone().position(|n| *n == e.name).unwrap_or(ORDER_MAX), e.slot)
+}
+
+// Entries are packed from index 0 in the phone's order; row i shows entries[i].
 #[cfg(target_os = "none")]
 pub fn scan() -> [Option<Entry>; ROWS] {
     use wp2_core::{fs, layout::slot_path};
-    let mut out = [None; ROWS];
+    let mut found: [(Option<Entry>, *mut u8); ROWS] = [(None, core::ptr::null_mut()); ROWS];
     let mut n = 0;
     let mut file: fs::File = [0; 0x2C];
     for slot in 0..SLOTS {
@@ -45,12 +75,26 @@ pub fn scan() -> [Option<Entry>; ROWS] {
                 } else {
                     wp2_core::pkg::features(&desc)
                 };
-                lv::set_icon(n, icon);
+                found[n].1 = icon;
             }
-            out[n] = Some(e);
+            found[n].0 = Some(e);
             n += 1;
         }
         fs::close(&mut file);
+    }
+    let order = order();
+    // ponytail: insertion sort, core's sort costs ~7 KiB of the 64 KiB loader region
+    for i in 1..n {
+        let mut j = i;
+        while j > 0 && found[j].0.map(|e| rank(&e, order)) < found[j - 1].0.map(|e| rank(&e, order)) {
+            found.swap(j, j - 1);
+            j -= 1;
+        }
+    }
+    let mut out = [None; ROWS];
+    for (row, &(e, icon)) in found.iter().enumerate() {
+        out[row] = e;
+        lv::set_icon(row, icon);
     }
     out
 }
@@ -467,6 +511,23 @@ mod tests {
         assert_eq!(cstr(&initial(&e)), b"A");
         assert_eq!(cstr(&initial(&entry(0, &header("éte".as_bytes(), 0)).unwrap())), "é".as_bytes());
         assert_eq!(cstr(&initial(&entry(0, &header(b"7", 0)).unwrap())), b"7");
+    }
+
+    #[test]
+    fn order_ranks_rows() {
+        let mut order: Order = [[0; 24]; ORDER_MAX];
+        let field = |s: &[u8]| { let mut f = [0u8; 24]; f[..s.len()].copy_from_slice(s); f };
+        (order[0], order[1], order[2]) = (field(b"c"), field(b"gone"), field(b"a"));
+        order[4] = field(b"b"); // after the end of the list: ignored
+        let mut rows = [b"a", b"b", b"c", b"d"].map(|n| entry(0, &header(n, 0)).unwrap());
+        for (i, e) in rows.iter_mut().enumerate() {
+            e.slot = i as u8;
+        }
+        rows.sort_unstable_by_key(|e| rank(e, &order));
+        assert_eq!(rows.map(|e| e.name[0]), *b"cabd");
+        rows.sort_unstable_by_key(|e| rank(e, &[[0; 24]; ORDER_MAX]));
+        assert_eq!(rows.map(|e| e.slot), [0, 1, 2, 3], "no list: slot order");
+        assert_eq!(core::mem::size_of::<OrderTable>(), 8 + 24 * ORDER_MAX);
     }
 
     #[test]
