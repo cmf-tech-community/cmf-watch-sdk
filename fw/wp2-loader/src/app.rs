@@ -1,4 +1,4 @@
-use crate::{hr, lv, media, motor, svc, ui};
+use crate::{gps, hr, lv, media, motor, svc, ui};
 use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use wp2_core::gfx;
@@ -83,7 +83,7 @@ pub fn launch(slot: u8) -> Result<(), i32> {
     POLLED_AT.store(millis(), Ordering::Relaxed);
     motor::reset();
     QUEUE.clear();
-    svc::start(h.abi_minor);
+    svc::start(slot, h.abi_minor);
     ui::canvas().fill_rect(0, 0, 466, 466, 0);
     ui::PENDING.store(gfx::EMPTY, Ordering::Relaxed);
     ui::PUBLISHED.store(gfx::FULL, Ordering::Release);
@@ -114,6 +114,7 @@ pub fn stop_app() {
     stock!(K_THREAD_ABORT, fn(*mut u8))(addr_of_mut!(THREAD_BUF) as *mut u8);
     motor::off();
     hr::stop();
+    gps::stop();
     media::stop();
     svc::stop();
     // LVGL keeps no object, callback or font of the app once its block is gone
@@ -203,7 +204,7 @@ extern "C" fn next_event(ev: *mut Event, timeout_ms: u32) -> bool {
     loop {
         POLLED_AT.store(millis(), Ordering::Relaxed);
         // straight to the app, not through QUEUE: the UI thread is its only producer
-        if let Some(e) = hr::due() {
+        if let Some(e) = hr::due().or_else(gps::due) {
             if !ev.is_null() {
                 unsafe { ev.write(e) };
             }

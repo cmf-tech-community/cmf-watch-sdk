@@ -167,3 +167,31 @@ def abi_minor(image: bytes, elf: bytes) -> int:
                     raise ValueError("WP2_ABI_MINOR lies outside the image")
                 return struct.unpack_from("<H", image, value)[0]
     return 0
+
+
+ORDER_MAGIC = b"WP2ORDER"
+ORDER_MAX = 16
+
+
+def set_order(data: bytes, names: Sequence[str]) -> bytes:
+    """The loader package with the menu order `names` in its WP2ORDER table (docs/app-order.md)."""
+    pkg = parse(data)
+    if pkg.kind != KIND_LOADER:
+        raise ValueError("the app order goes into the loader package")
+    if len(names) > ORDER_MAX:
+        raise ValueError(f"at most {ORDER_MAX} names, got {len(names)}")
+    at = pkg.image.find(ORDER_MAGIC) + len(ORDER_MAGIC)
+    if at < len(ORDER_MAGIC) or pkg.image.count(ORDER_MAGIC) != 1:
+        raise ValueError("loader has no single WP2ORDER table (loader older than the app order?)")
+    end = at + 24 * ORDER_MAX
+    if end > len(pkg.image) or any(at - 3 <= r < end for r in pkg.relocs):
+        raise ValueError("WP2ORDER table is cut short or relocated")
+    table = b""
+    for name in names:
+        encoded = name.encode("utf-8")
+        if not 1 <= len(encoded) <= NAME_BYTES:
+            raise ValueError(f"name {name!r} must be 1..{NAME_BYTES} UTF-8 bytes")
+        table += encoded.ljust(24, b"\0")
+    image = pkg.image[:at] + table.ljust(24 * ORDER_MAX, b"\0") + pkg.image[end:]
+    return pack(image, name=pkg.name, version=pkg.version, entry=pkg.entry, kind=pkg.kind, relocs=pkg.relocs,
+                abi_minor=pkg.abi_minor)

@@ -10,6 +10,8 @@ macro_rules! stock {
 #[cfg(target_os = "none")]
 mod app;
 #[cfg(target_os = "none")]
+mod gps;
+#[cfg(target_os = "none")]
 mod hr;
 #[cfg(target_os = "none")]
 mod lv;
@@ -329,6 +331,7 @@ mod view {
         fs::unlink(&layout::data_path(entry.slot, false));
         fs::unlink(&layout::data_path(entry.slot, true));
         fs::unlink(&layout::widget_path(entry.slot));
+        fs::unlink(&layout::blob_path(entry.slot));
         m.failed = None;
         menu::lv::delete();
         m.entries = menu::scan();
@@ -342,6 +345,7 @@ mod view {
         motor::watchdog();
         svc::tick(app::running(), app::paused());
         crate::hr::tick(app::running(), app::paused());
+        crate::gps::tick(app::running(), app::paused());
         crate::media::tick(app::running(), app::paused());
         crate::music::tick();
         hold_face(app::running() && m.page.is_none());

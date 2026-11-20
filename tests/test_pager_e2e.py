@@ -171,6 +171,12 @@ class PagerTest(unittest.TestCase):
             asyncio.run(send(b"!key 2"))
             emu.sleep(1.5)
             self.assertEqual(stats()[KEY], -19, "no phone media: ENODEV")
+            asyncio.run(send(b"!key 6"))  # volume down passes the check like play
+            emu.sleep(1.5)
+            self.assertEqual(stats()[KEY], -19, "volume down: ENODEV, not -22")
+            asyncio.run(send(b"!key 7"))
+            emu.sleep(1.5)
+            self.assertEqual(stats()[KEY], -22, "cmd 7: Malformed")
             self.assertEqual(stats()[MEDIAS], 1, "MEDIA without a change")
 
             emu.send("c 1", "c 0", pause=3)  # crown press: BUTTON, ui-gallery returns

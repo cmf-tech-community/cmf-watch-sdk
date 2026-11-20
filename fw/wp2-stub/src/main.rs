@@ -58,6 +58,8 @@ extern "C" fn wp2_boot_c() {
     ram.api = 1;
     ram.kick = ble::wp2_kick as usize as u32;
     ram.kick_magic = wp2_core::layout::KICK_MAGIC;
+    ram.stub_version = wp2_core::layout::STUB_VERSION;
+    ram.version_magic = wp2_core::layout::VERSION_MAGIC;
 }
 
 #[panic_handler]

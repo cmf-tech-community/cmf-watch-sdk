@@ -19,6 +19,8 @@ pub const LV: u8 = 8;
 pub const HEART: u8 = 9;
 // loader of 2026-11-16, no ABI bump (docs/abi-1.4.md, "Music"): x = 1 playing, y = 1 phone media available
 pub const MEDIA: u8 = 10;
+// loader of 2026-11-19, no ABI bump (docs/abi-1.4.md, "GPS"): x = fix quality (0 = none), y = satellites
+pub const GPS: u8 = 11;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq, Debug)]

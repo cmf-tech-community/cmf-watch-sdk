@@ -19,11 +19,13 @@ class InstallChunksTest(unittest.TestCase):
 
 
 class FakeSession:
-    def __init__(self, slots=()):
-        self.calls, self.slots = [], dict(slots)
+    def __init__(self, slots=(), stub=6):
+        self.calls, self.slots, self.stub = [], dict(slots), stub
 
     async def request(self, c1, c2, payload, expect, timeout=6.0):
         self.calls.append((c2, payload))
+        if c2 == install.INFO and payload[0] == install.STUB_SLOT:
+            return b"\0" + struct.pack("<IB", self.stub, 3)
         if c2 == install.INFO:
             return b"\0" + self.slots.get(payload[0], b"")
         if c2 == install.DATA:
@@ -46,6 +48,15 @@ class InstallFlowTest(unittest.IsolatedAsyncioTestCase):
     async def test_same_name_replaced(self):
         s = FakeSession({0: sample("other")[:64], 3: sample()[:64]})
         self.assertEqual(await install.install(s, sample()), 3)
+
+    async def test_slots_8_to_15_from_stub_8(self):
+        full = {n: sample(f"app{n}")[:64] for n in range(8)}
+        with self.assertRaisesRegex(ValueError, "no free slot"):
+            await install.install(FakeSession(full, stub=7), sample())
+        s = FakeSession(full, stub=8)
+        self.assertEqual(await install.install(s, sample()), 8)
+        self.assertIn((install.INFO, bytes([15])), s.calls)
+        self.assertNotIn((install.INFO, bytes([8])), FakeSession(stub=6).calls)
 
     async def test_loader_goes_to_loader_slot(self):
         self.assertEqual(await install.install(FakeSession(), sample("l", package.KIND_LOADER)), 0xFF)
@@ -89,13 +100,35 @@ class InstallFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await install.info(s, 2)).icon)
 
 
+class PushTest(unittest.IsolatedAsyncioTestCase):
+    def test_widget_record_as_the_sdk(self):
+        rec = install.widget_record("Weather", "21°\nSunny")
+        self.assertEqual(len(rec), 64)
+        self.assertEqual(rec[:8], b"Weather\0")
+        self.assertEqual(rec[24:35], "21°\nSunny".encode() + b"\0")
+        long = install.widget_record("é" * 20, "x" * 50)
+        self.assertEqual(long[:24], "é".encode() * 11 + bytes(2), "cut at a char boundary, NUL kept")
+        self.assertEqual(long[24:], b"x" * 39 + b"\0")
+
+    async def test_push_frame_and_later(self):
+        s = FakeSession()
+        await install.push(s, 9, install.PUSH_BLOB, b"\x01\x02")
+        self.assertEqual(s.calls, [(install.PUSH, bytes([9, 1, 1, 2]))])
+
+        class Later(FakeSession):
+            async def request(self, *a, **k):
+                return bytes([install.Status.LATER]) + (1234).to_bytes(4, "little")
+        with self.assertRaisesRegex(ValueError, "LATER, retry in 1234 ms"):
+            await install.push(Later(), 0, install.PUSH_WIDGET, b"")
+
+
 class CliTest(unittest.TestCase):
     def test_slot_arg(self):
         from wp2apps import cli
         self.assertEqual(cli.slot_arg("L"), 0xFF)
-        self.assertEqual(cli.slot_arg("7"), 7)
+        self.assertEqual(cli.slot_arg("15"), 15)
         with self.assertRaises(Exception):
-            cli.slot_arg("8")
+            cli.slot_arg("16")
 
     def test_stock_app_failure_is_error_with_stderr(self):
         from unittest import mock

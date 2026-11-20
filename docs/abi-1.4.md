@@ -66,6 +66,11 @@ The app on the watch side needs nothing new: `send`/`recv` as in `docs/app-guide
 - A stock host still polls with `PING`. A `K` host may poll too, but does not have to: 40 messages in a burst
   arrived without a host frame, none lost, `seq` contiguous (emulator).
 
+## App order in the menu (loader of 2026-11-19, no ABI bump)
+
+The phone sets the order of the Apps menu by installing a loader package with a `WP2ORDER` table: no new command,
+any stub. Contract: `docs/app-order.md`.
+
 ## Install order
 
 New stub (OTA, `docs/ota.md`) and new loader (`wp2apps install target/loader.wp2app`). Each works with the other's
@@ -153,6 +158,97 @@ that return off while an app runs, as the stock does for its own workout views (
 face"). No ABI change. Since the stop on a dark panel the measurement no longer holds the watch out of deep sleep;
 the return stays held anyway.
 
+## GPS (loader of 2026-11-19, no ABI bump)
+
+The watch's own GPS for an app, as the stock outdoor workouts use it. Stock side: `docs/recon.md`, "GPS". Emulator
+proof: `tests/test_gps_e2e.py` (app `sdk/examples/gps-probe`, a canvas app) with the emulator's NMEA model and a
+synthetic position. Not yet on hardware.
+
+**Loader only.** Same path as heart rate: a SENSOR record and a new record on `lv_submit`, which the table has
+since 1.2. `ABI_MINOR` stays 3, the stub does not change (no stub 9, no OTA): install the new loader, then the app.
+An older loader answers `-22` (op `0x18` and SENSOR value 2 are unknown there). No package flag: the loader needs
+nothing at launch, the app asks at run time and the loader turns it off on every way out.
+
+### The calls
+
+SDK: `Api::gps(&self, on: bool) -> i32`, `Api::gps_fix(&self) -> Option<GpsFix>`, event kind `GPS` = 11.
+
+- `gps(true)`: the loader sets ux2sys `0x63` to **1** (the stock workouts' mode) from its UI tick and queues
+  `Event { kind: GPS, x: fix quality, y: satellites }` once per 1000 ms (`wp2_core::gps::EMIT_MS`) while the app runs
+  in the foreground, the panel dark included (handed out from `next_event`, as HEART). `x` 0 = no fix yet.
+- `gps_fix()`: the latest fix, read from the stock parser's block when called:
+
+  | Field | Unit | Source |
+  |---|---|---|
+  | `lat_e7`, `lon_e7` | 1e-7 degrees, rounded | GGA, f64 in the stock |
+  | `alt_dm` | decimetres above mean sea level | GGA altitude (f32 m) |
+  | `ms` | the loader's `millis` at the read | loader |
+  | `fix` | GGA fix quality: 0 none, 1 GPS, 2 DGPS | GGA |
+  | `sats` | satellites in use | GGA |
+  | `ttff_s` | seconds from the start to the first fix, 0 before it | stock |
+
+  **No speed, course or accuracy**: the stock parses only GGA (and GSV SNRs); RMC is dropped, HDOP is read and not
+  kept. An app derives speed and course from successive fixes (`gps-probe` does speed). `None` while the app has not
+  asked for the GPS, and on an older loader.
+- `gps(false)` turns it off and queues one GPS event with `x` 0. Returns 0, or `-22` on an older loader.
+- The loader turns the GPS off (mode 0) on exit, crash, force stop, view delete and `PAUSE`, and on again on
+  `RESUME`. A new launch starts with it off. One start per hold, one stop at its end (`wp2_core::gps::Hold`, the
+  heart rate's rule).
+- **A GPS the stock already runs is only read.** The stock keeps no request count for the GPS: one mode, and any
+  `0` powers the receiver down (`docs/recon.md`, "GPS", Ownership). If the mode in force (`0x380443F5`) is non-zero
+  when the app asks, the loader never writes `0x63` for that hold, so an app cannot cut a stock workout's GPS. In
+  the other direction a stock workout cannot start while the app is in the foreground; on `PAUSE` the loader has
+  already turned its own GPS off.
+
+### Wire format
+
+- SENSOR record `[0x13, 2, 0, 0, 2, on]` (sensor 2 = GPS; `cmf_wp2_app::GPS_ON`, `GPS_OFF`).
+- GPS_FIX record `[0x18, 20, 0, 0, <20 bytes>]`, alone in a batch, in the app block (a `static mut`): the loader
+  overwrites the 20 payload bytes with `lat_e7 i32, lon_e7 i32, alt_dm i32, ms u32, fix u8, sats u8, ttff_s u16`
+  (LE) and returns 0, or `-1` while the app holds no GPS. The stock block is cleared and refilled at every GGA on
+  `gps_service`; the loader copies it until two copies agree (`fw/wp2-loader/src/gps.rs`).
+
+### Privacy and battery
+
+- Positions are personal data: apps and tests never log or send them unasked; the loader never logs them; the e2e
+  test uses a synthetic position. `gps-probe` shows them rounded to 0.001° (about 100 m).
+- **The stock stores a track point every ~5 s while the GPS has a fix, workout or not** (`record_gps_data`, the
+  stock GPS store that `sport_gps_data_sync` hands to the phone). An app's GPS session leaves points there, as a
+  stock workout's does. Whether Nothing X shows or uploads points outside a workout is not known: the real-watch
+  check below looks for it.
+- The receiver is powered while an app holds it: ask only while the position is shown or recorded. The draw was not
+  measured; the plan below measures it.
+
+### First real-watch check (plan, not run)
+
+The owner decides when, and runs it. Order: install the loader of 2026-11-19 and `gps-probe` (phone or
+`wp2apps install`), nothing else changes on the watch.
+
+1. **Baseline, no app.** Outdoors, open sky. Stock Outdoor run: note the seconds from opening the sport list until
+   the GO screen shows a GPS fix. End the workout. Charge to 100 %.
+2. **Time to first fix.** Leave the watch indoors ≥ 2 h (cold-ish start), go outdoors, open `gps-probe`, wait for
+   `FIX n SAT TTFF s`; note `s` (`ttff_s`). Repeat warm (exit,
+   reopen within 1 min) and after 30 min off. Do it once with the phone linked (aiding over BLE,
+   `auxiliary_gps_request`) and once with Bluetooth off on the phone.
+3. **Fix rate and quality.** Walk 10 min: the event rate (one per second expected), satellites, that the rounded
+   position follows the walk, that the speed reads walking pace (4–6 km/h). Coordinates stay on the watch: report
+   counts and rates, not positions.
+4. **Battery per hour.** From 100 %, `gps-probe` open outdoors with a fix, panel on its own timeout, for 60 min;
+   note the percent drop (`wp2apps info` or the watch) and compare with 60 min of the stock Outdoor run (step 1 day,
+   same conditions) and with 60 min idle. Expect the app ≈ the stock workout minus its heart rate.
+5. **Turned off afterwards.** Exit `gps-probe` with the button, then 30 min idle
+   and compare the drop with idle (a receiver left on shows as several percent). Optional read-only check: `AT
+   GETGPSSNR` after exit should report 0 satellites.
+6. **Stock still gets GPS.** Right after the app's exit: stock Outdoor run, check the GO screen gets a fix and the
+   workout records a track (Nothing X after sync). Also the other order: start the stock Outdoor run, go back to the
+   face with the workout running, open `gps-probe` (it reads the workout's fix), exit it, and check the workout's track
+   has no gap after that moment.
+7. **The stock track store.** After step 3, sync with Nothing X and look for a stray track or points at the time of
+   the app session outside any workout. If they show up, the API needs a note (or a different mode) before apps use
+   it.
+
+Abort criteria: the watch reboots, the GPS stays on after exit (step 5), or the stock workout loses its fix (step 6).
+
 ## Pager (loader of 2026-11-14, no ABI bump)
 
 A vertical pager of full-screen pages, the stock `lv_tileview` (entries: `docs/recon-lvgl.md`, `lv_tileview`).
@@ -201,11 +297,11 @@ setter `0x100E07B8`): `0x31` phone link (u32), `0x4C` media available (u32), `0x
 (set, u32: 1 play, 2 pause, 3 previous, 4 next; the stock sends it only when `0x31` and `0x4C` are non-zero),
 `0x4F` title `[0..0x40]` and artist `[0x41..0x81]` (NUL-terminated). Reading the volume (`0x50`) is not offered; volume up and down are (MEDIA_KEY 5, 6).
 
-- **MEDIA_KEY** record, alone in a batch: `[0x16, 1, 0, 0, cmd]`, cmd 1..=4, and since the next loader 5 volume up
+- **MEDIA_KEY** record, alone in a batch: `[0x16, 1, 0, 0, cmd]`, cmd 1..=4, and since the loader after 2026-11-19 5 volume up
   and 6 volume down (the volume popup's own commands, one phone volume step each). The UI tick checks the link and
   media and sets `0x4E`; the app thread waits for it as for an LVGL batch (with the panel dark it returns once it is
-  lit). `0`, `-19` without a phone link or media, `-22` for another cmd and on an older loader (the loader of
-  2026-11-16: `-22` for 5 and 6).
+  lit). `0`, `-19` without a phone link or media, `-22` for another cmd and on an older loader (the loaders of
+  2026-11-16 to 2026-11-19: `-22` for 5 and 6).
 - **MEDIA_BIND** record, alone in a batch: `[0x17, 5, 0, 0, on, title u16, artist u16]`. `on = 1`: from the next UI
   tick, once a second while the app runs in the foreground, the loader reads `0x4D`, `0x31`/`0x4C` and `0x4F`; it
   queues `Event { kind: MEDIA (10), x: playing, y: available }` once at the bind and on every change, and writes
@@ -271,3 +367,41 @@ can't be read back. So the stub answers its own release:
 - Host: `install.stub` (`wp2apps list` prints it as `stub`).
 - Stub 6: `BEGIN` into the loader slot or an app page's slot is no longer `BUSY` while the page is only behind the
   face; the page reloads on its next FOCUS (`docs/app-guide.md`, install notes). Same frames, same statuses.
+- Stub 7: `DELETE` of an app page's slot is no longer `BUSY` while the page is only behind the face; the stub drops
+  the app's page and widgets from the cards (the stock lays the face out again, which stops the app), then unlinks.
+  Every `DELETE` now takes the slot's widgets and page off the cards. `DELETE` of the loader slot stays `BUSY` while
+  it is held. Same frames, same statuses (`docs/app-guide.md`, install notes).
+- Stub 8: 16 app slots (next section) and `PUSH` (`0x90A8`): the phone sets an app's widget record or start blob
+  while it does not run (`docs/widget-push.md`).
+
+## 16 app slots (stub 8, loader of 2026-11-19, no ABI bump)
+
+- **Which stub takes which slots.** `INFO` (`0x90A0`), `BEGIN` (`0x90A1`), `DELETE` (`0x90A4`) and `MSG` (`0x90A5`)
+  accept app slots `0..15` from **stub 8** on. Stub 7 and older take `0..7` and answer `BadRequest` (1) for
+  `8..15`. The host reads the stub version first (`INFO` slot `0xFE`, section above): `>= 8` → 16 slots, else 8.
+  Listing = `INFO` for `0..count-1` and `0xFF`; a new app goes to the slot of the same name, else the first free one
+  below `count` (`install.slots`, `install.install`). Slot numbers stay bytes; `0xFE`/`0xFF` keep their meaning.
+- **Files.** `/NAND:/wp2apps/<d>.pkg|.dat|.new|.wgt|.tmp` with `<d>` the slot as one hex digit, upper case:
+  `0`..`9`, `A`..`F`. Slots `0..7` keep the names of older stubs, so nothing moves on the OTA.
+- **Pages.** View `0xF8 + slot`: `0xF8..0xFF` for slots 0..7 as before, `0x100..0x107` for slots 8..15 (the stock
+  view ids end at 237; `wp2apps firmware` adds 17 table entries). Stub 8 with `PUSH` is `0x2F31` bytes
+  and stub + table exactly `0x4000`: the stub's flash region went from `0x3000` to `0x5000` and `STUB_MAX` from
+  `0x4000` to `0x6000` so the next change has room. Both are budgets of our own (the NOR app partition has ≈ 964 KiB
+  free after `app.bin`, `docs/recon.md`).
+  The phone's `0x906D` view card carries the id as `u16` LE: `02 00 07 01` is slot 15's page.
+- **Widgets.** `0x40` with `param_id = slot + 1`, so `1..16`.
+- **Loader.** Reads the stub's release from `StubRam.stub_version` behind `version_magic = "WPSV"` (stub 8 sets both
+  at boot; older stubs leave the bytes unset) and lists slots `0..15` on stub 8, `0..7` on stub 7 and older. A loader
+  from before 2026-11-19 lists `0..7` on any stub: install the new loader with the OTA, or apps in `8..15` stay
+  out of the menu (they still answer `INFO` and can be removed).
+- **NAND space.** A package is at most `64 + 2 × 128 KiB` (`BEGIN` limit), in practice image + relocations ≈ the
+  image: 16 × 128 KiB = 2 MiB, plus per slot `.dat` 4 KiB (+ `.new` 4 KiB during a save) and a 64 B `.wgt`, each
+  at least one 2 KiB cluster, plus the loader (64 KiB) and one `.tmp` during an install: ≈ 2.4 MiB with full-size
+  apps, ≈ 4.4 MiB in the theoretical worst case. The emulator's `/NAND:` (Zephyr `statvfs` through the mount API
+  `+0x44`, `tests/test_slots16_e2e.py`) is a 9.75 MiB FAT, 2 KiB clusters: 9.69 MiB free with the loader, 9.19 MiB
+  after 15 × 33 KiB + 2 KiB apps. That is the emulator's NAND fixture; the real watch was not measured (read-only
+  AT has no free-space query known to us), so check `statvfs` there before relying on it.
+- **RES heap.** The menu with 15 icons (27.7 KiB each) open: 4.6 MiB of `ResFbHeap` free, lowest ever 1.5 MiB
+  (emulator). An icon that does not fit falls back to the letter (`heap::alloc` checks first).
+- **Order of updates.** OTA first (stub 8), then the loader; until the OTA the phone sees 8 slots and installs only
+  there. Downgrading the stub leaves `8.pkg`..`F.pkg` on NAND unseen: remove them before.

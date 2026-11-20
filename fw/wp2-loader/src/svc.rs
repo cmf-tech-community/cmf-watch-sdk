@@ -30,14 +30,24 @@ fn inbox() -> &'static Ring {
     &stub_ram().inbox
 }
 
-// UI thread, app thread not running yet
-pub fn start(abi_minor: u8) {
+// UI thread, app thread not running yet. The blob the phone pushed (stub 8, docs/widget-push.md) is the app's first
+// host message: running_slot is still NONE, so the stub pushes nothing into the inbox meanwhile.
+pub fn start(slot: u8, abi_minor: u8) {
     let ram = stub_ram();
     KEEP_ON.store(false, Ordering::Relaxed);
     if channel() {
         ram.inbox.clear();
         ANNOUNCED.store(ram.inbox.head(), Ordering::Relaxed);
         ram.app_flags = if abi_minor >= 1 { APP_V11 } else { 0 };
+        let mut file: fs::File = [0; 0x2C];
+        if abi_minor >= 1 && fs::open(&mut file, &wp2_core::layout::blob_path(slot), fs::READ) >= 0 {
+            let mut blob = [0u8; wp2_core::chan::MSG_MAX];
+            let n = fs::read(&mut file, &mut blob);
+            fs::close(&mut file);
+            if n > 0 {
+                ram.inbox.push(slot, &blob[..n as usize]);
+            }
+        }
     }
 }
 

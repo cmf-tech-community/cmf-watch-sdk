@@ -554,6 +554,42 @@ with the bpm), the stock workout's pause, the battery cost. Calling `hr_callback
 `os_mutex_lock` first stopped the emulator twice ("Guest hit a fatal or unsupported path"); the probe calls it on
 `ui_service`.
 
+## GPS
+
+Ghidra (`scripts/recon/decomp`) on the functions below, the ux2sys table `0x101F4274` and the AT table
+(`0x101F4E30…`); emulator probe `scripts/recon/gps_probe.py` (`modes`, `workout`; frames in `runs/gps/`, not
+tracked) with the emulator's GPS model (UART1 NMEA: `$GPRMC` and `$GPGGA` for the position given by
+`g 1 lat_e6 lon_e6`, fix 1, 8 satellites, HDOP 0.9, altitude 0.0, speed 0.0; one GGA per ~1 s). Every position
+here is synthetic. API built on this: `docs/abi-1.4.md`, "GPS". GPS positions are personal data: never log, commit
+or report a real one.
+
+| Item | Value | Confidence |
+|---|---|---|
+| Receiver | Airoha **AG3352** (`gps_3352` log tag) on UART1 (`0x4003C000`, IRQ 23), power pin on GPIOB (`ag3352_poweron` `0x100FC900`, 1 on, 0 off), commands in Airoha `$PAIR…` NMEA (`0x101978FC` writes them). Zephyr device `"gps"`: ops `+4` enable (`gps_enable ok`, `0x101975E4`), `+8` disable (`gps_disable ok`, `0x101976C4`), `+0x28` set mode, `+0x2C` host download (firmware) | high (strings, emulator UART) |
+| Thread | `gps_service` (prio 4, stack `0x800` at `0x38016D08`, entry **`0x10198178`**, thread table entry `0x1000049C`): message `0x23` with sub-op 0 = enable (mode in the payload), 1 = disable, 2 = an NMEA line from the UART, 5 = EPO download done; messages 3 (init), 5 (`GPS SUSPEND_APP`: disable), 6 (`GPS RESUME_APP`) | high (code) |
+| Mode, property **`0x63`** | ux2sys setter **`0x101B9B4E`** (u32): 0 → `0x101DAABA` (message `0x23`/1, disable), else `0x101DAAAE(mode)` (`0x23`/0). No getter. `AT SETGPSSWITCH n` (`0x100EA254`) accepts 0..5 and calls the setter through `0x100E08B8` | high (code, emulator) |
+| Mode state | **u8 `0x380443F4`** `[0]` EPO counter, **`[1]` mode in force (0 = off)**, `[2]` applied mode, `[3]` special mode (2 = EPO download, 3 = host download: a disable is refused while set, `…do not disable !!!`), `[4]` recovery mode (restored after EPO). Enable with `[2]` = 0 powers the AG3352 on (`ag3352_enable_poweron`, `gps_enable ok`); disable powers it off (`ag3352_disable`, ~1.5 s later `power pin false`) and zeroes the info block | high (emulator) |
+| Modes | **0** off. **1** normal: the stock workouts' mode; at enable also `set_rtc_time_location` (sends `$PAIR590` time and `$PAIR600` last location to the receiver as aiding data) and `auxiliary_gps_request` (asks the phone for EPO/aiding, `0x100D28DC` sends `0xA06A`); at the first NMEA `$PAIR064,200` (`0x10197D40`). **2** EPO download, **3** firmware host download (special modes, not for apps). **4** `$PAIR512` + `$PAIR130,0,FFFFFFFE` …, **5** `$PAIR512` + `$PAIR130,0,8FF7DFDF` … (PAIR130 = per-constellation satellite masks; which constellation set 4 and 5 pick, or whether 4/5 trade accuracy for power, is not known). In the emulator 1, 4 and 5 give the same fix | high (code) for 0–3, low for what 4 and 5 mean |
+| Ownership | **no request count**: one mode, last writer wins. `sportlist_view` `0x6A` sets 1 at layout (`0x1007EF3C`, log `sport_view_set_gps_enable 463 1`), `sport_prepartion_view` `0x6B` sets 1 again for a GPS sport (`sel_sport_type = 2 need_close_gps_flag = 0`, `_display_gps_propartion_view`); leaving them sets 0 (`0x1007B1FC`, `0x1007EC00` if the view had set it). The factory GPS test view (`GPS(%d)`, `0x10091244`) sets 0 at close. Whoever sets 0 turns the receiver off for everyone | high (emulator, code) |
+| Info block | **`0x38016C40`**, 0x68 B, filled by the NMEA parser **`0x10197D40`** (minmea formats at `0x10198C64` …): at each **GGA** (format `tTfdfdiiffcfcf_`) it is cleared, then **f64 latitude `+0x38`**, **f64 longitude `+0x40`** (degrees, signed), **f32 altitude `+0x48`** (m, GGA field 9), **u32 fix quality `+0x4C`**, **u32 satellites in use `+0x50`**, **u32 time to first fix `+0x54`** (s from the enable, set at the first fix, kept while the fix holds). **GSV**: SNRs as bytes from `+0`, count `0x380542C8` (≤ 0x31). `$PAIRM…` (type 10): f32 at `+0x5C` (meaning unknown). **RMC and ZDA are classified but not parsed**: no speed, course or HDOP anywhere in it | high (code, emulator: lat/lon/quality/sats/ttff matched the fed position; altitude only seen at 0) |
+| Property `0x62` | getter `0x100E37D0` writes the pointer `0x3800CD80`, not the info block; `AT GETGPSSNR` (`0x100EA1D4`) prints `sats, lon, lat, alt, (snr0)…(snr5)` from the block it gets (`GETGPSSNR:%d,%.3f,%.3f,%.1f,…`). The loader reads `0x38016C40` directly | medium (the two addresses were not reconciled; the emulator filled `0x38016C40`) |
+| Rate | one GGA per second in the emulator (the model's cadence; `$PAIR064,200` at mode 1 is assumed to set the receiver's own rate, Airoha docs not checked) | medium |
+| Consumer path | each GGA with a fix: sensor callback `0x10101BEC` (copies lat/lon, posts sensor `0x18`), `gps_sensor_handler` `0x10197468` → sport `input_gps_data` (`0x1004C6F8`, the workout's track and distance) | high (emulator UART) |
+| Stock track store | while the GPS has a fix, **with or without a workout**, `record_gps_data` stores `{time, lon, lat}` every ~5 s (`gps_data_write` `0x100C4BCC`: 12 B records in a RAM buffer, flushed to flash when full, `erase_gps_data_storage_newone` at boot); `sport_gps_data_sync` sends stored points to the phone. So an app's GPS session leaves points in the stock store; whether Nothing X shows or uploads points outside a workout's time window is **not known** | high (emulator) for the writes, unknown for the sync |
+| Boot | at boot gps_service enables briefly to read the firmware version (`$PAIR025`), then disables (`not get gps version` in the emulator) | high (emulator) |
+| Power | the AG3352 is powered only between enable and disable; a disable powers it down even when another consumer still wants it (no count) | high (code); current draw not measured |
+
+Emulator proof (`scripts/recon/gps_probe.py modes`, stub NOR): mode 1, 4, 5 each log `_gps_service_proc enable[n]`,
+`ag3352_enable_poweron`, `gps_enable ok`, `$xxGGA: position time ok: 1` and fill the block (fix 1, 8 sats, ttff 1 s,
+the fed position); 0 logs `disable[0]`, `gps_disable ok`, `ag3352_disable gps_work power pin false` and zeroes the
+block. `workout`: opening the sport list turned the GPS on (mode 1), the GPS sport's GO screen set 1 again, the button
+back to the face set 0. The run screen itself was not reached (the panel had gone dark in the probe), so the stock
+workout's own start, pause and end path were read from code only.
+
+Not proven: real fixes, time to first fix and the fix rate on hardware; what modes 4 and 5 change; the battery
+cost; whether the stock track store's points reach Nothing X outside a workout; whether `$PAIR600` aiding with a
+stale location slows a first fix.
+
 ## Widget cards (face swipe left)
 
 Static (capstone on the stock `app.bin` with the stub, 2026-11-14); what the emulator proved is under "Emulator
@@ -650,3 +686,57 @@ icon reader; the tile is text only); `param_id` of the stock families; byte `0x6
 
 Not proven in the first pass (no emulator on that machine) and settled by the emulator results above: the widget
 drawing and tapping. Still unmeasured: what the 1 s update costs (the stub's update returns at once).
+
+## Stock watch faces over BLE: set active, delete (0xFFFF9055)
+
+For FMC Companion (tap = make active, context menu = delete). Ghidra (`scripts/recon/decomp`) on the BLE dispatcher
+`FUN_100D343C`, its `0x9055` handler `FUN_100D3138` and `WFManager.c` (`0x100DC500..0x100DE900`); checked on the
+emulator (stock paired NOR over netsim, 2026-11-18): get, set active, drop an id.
+
+One command does both: **`0xFFFF9055`**, the phone side of `0xA055`. Session-encrypted like any stock command (sent
+on the command characteristic in the emulator run). Payload, ids **LE**:
+
+| op | payload | effect | reply |
+|---|---|---|---|
+| get | `00` | `sync_watch_face_info` (`FUN_100D2D5C`) | `0xA055` list, as after auth |
+| set | `01 ‖ idx ‖ cnt ‖ 00 ‖ cnt × u32 id` | `WFManager_SetWatchFaceListForBle(idx, cnt, ids)` `0x100DE6FC` → pending opt 2 → `_SetList` in `FUN_100DE10C` | `0xA055` with the single byte `00` |
+
+The `0xA055` list is `01 ‖ idx ‖ cnt ‖ 07 ‖ cnt × u32 id`: byte 1 is the **active index** (`WFM GetList idx:%u cnt:%u`,
+`FUN_100DE67C`: `*(u8*)0x3801AE55`), byte 2 the count (at most 10), byte 3 the constant 7 (`FUN_101B91C8`). Every
+entry of the watch's list is sent; records are 16 B from `0x3801AE5C`.
+
+`_SetList` walks the sent ids in order and keeps those already in the watch's list, in the new order; the active face
+becomes the sent entry at `idx` (index into the **sent** list; 0 if that id is not on the watch). It then saves the
+list (`FUN_100DD16C`) and reloads the face. Consequences:
+
+- **Set active**: send the current list unchanged with a new `idx`. Emulator: `idx 0 → 1` gave
+  `WFM _SetList … Opt ret:0`, then `WFM Load Idx:1, Id:274` at once, and the next get returned header `01 01 06 07`.
+- **Delete**: send the list without the id (and `idx` of the face that should stay active). Emulator: dropping 280
+  gave `cnt 5` in the next get. The list entry goes at once; a downloaded face's `.wfc` stays on NAND until
+  `WFManager_DelRubbish` (`FUN_100DCFEC`, deletes `/NAND:/*.wfc` whose id is not listed) runs at boot (`0x100E0F2E`)
+  or at the next upload init (`0x9063` `0x100EBB4A`, `0x9075` `0x100EBEAC`). Built-ins (`273 274 275 276 277 280`,
+  table `0x101F3D54`) are never deleted from NAND, only unlisted.
+- Ids not on the watch are ignored: the command cannot add or bring back a face. The reply is `00` even when nothing
+  matched (all unknown ids leave the list as it was), so read the list again to confirm.
+- `0xFFFFFFFF` in the list is the photo ("album") face, not a separator: `FUN_100DC534` returns kind 1 for `-1`,
+  0 for the six built-ins, 2 for downloads. Keep it in a set list like any other id.
+
+Other paths:
+
+- Gadgetbridge's `WATCHFACE` `0x009F/0x0001` does **not** change the face: the dispatcher (`0x100D52AE`) only logs
+  `set wf id:%d` with `payload[0] - 1` and answers an empty `0x009F/0x0003`. `0x009F/0x0002` sends the `0xA055` list
+  (`FUN_100D2D5C`), like `0x9055 00`.
+- Delete through the upload flow (`0x9075` with `new_wf_id = 0`, cmf-watch-utils `protocol/ble.md` §4.1, verified on
+  hardware) still needs the data phase; `0x9055` needs none.
+
+| Claim | Confidence |
+|---|---|
+| `0x9055` layout, set active, unlist | high (static + emulator, built-in faces) |
+| `0x9055 00` on hardware | high: 2026-11-18 a real watch answered `01 03 06 07` + six downloaded ids (all > 2³⁰): downloaded faces **are** listed, no `0xFFFFFFFF` when no photo face is installed |
+| Set active on hardware | high: same list with `idx 3 → 4` and back, reply `00`, header followed, the face on screen changed (owner) |
+| Downloaded face: unlisted, then its file deleted at boot / next upload | medium (static only) |
+| `0xFFFFFFFF` = photo face | medium (static) |
+| `0x009F/0x0001` is log-only | high (static) |
+
+Not yet tried on hardware: unlist (delete); a set while the watch is in face edit mode (`WFM in EditMode` suggests the
+handler waits for it); dropping the active face (the code takes the entry at `idx`, so pick another `idx`).

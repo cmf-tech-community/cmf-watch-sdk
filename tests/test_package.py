@@ -16,6 +16,23 @@ class PackageTest(unittest.TestCase):
         self.assertEqual((pkg.name, pkg.version, pkg.kind, pkg.abi, pkg.entry, pkg.image, pkg.relocs),
                          ("Vibration Lab", 3, package.KIND_APP, 1, 0, image, (0, 8)))
 
+    def test_set_order(self):
+        image = b"\x01" * 8 + package.ORDER_MAGIC + bytes(24 * package.ORDER_MAX) + b"\x02" * 8
+        loader = package.pack(image, name="loader", version=3, kind=package.KIND_LOADER, relocs=(0,))
+        out = package.parse(package.set_order(loader, ["hello", "api-demo"]))
+        self.assertEqual((out.name, out.version, out.relocs), ("loader", 3, (0,)))
+        table = out.image[16:16 + 24 * package.ORDER_MAX]
+        self.assertEqual(table[:48], b"hello".ljust(24, b"\0") + b"api-demo".ljust(24, b"\0"))
+        self.assertFalse(any(table[48:]))
+        self.assertEqual(out.image[:16] + out.image[-8:], image[:16] + image[-8:])
+        self.assertEqual(package.parse(package.set_order(loader, [])).image, image)
+        with self.assertRaises(ValueError):
+            package.set_order(loader, ["x"] * 17)
+        with self.assertRaises(ValueError):
+            package.set_order(package.pack(image, name="a", version=1), ["x"])
+        with self.assertRaises(ValueError):  # a relocated word inside the table
+            package.set_order(package.pack(image, name="l", version=1, kind=package.KIND_LOADER, relocs=(20,)), [])
+
     def test_features(self):
         from wp2apps import icon
         self.assertEqual(package.features(b"WP2F\x03\0\0\0" + bytes(8)), ["widget", "page"])

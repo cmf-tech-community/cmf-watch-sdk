@@ -8,10 +8,12 @@ from . import package
 from .link import SYSTEM
 
 MAX_DATA = 128
-SLOTS = 8
+SLOTS = 16  # stub 8; a stub before it takes 0..7 (`slots`)
+SLOTS_OLD = 8
 LOADER_SLOT = 0xFF
 STUB_SLOT = 0xFE  # INFO for it: the stub's version (docs/abi-1.4.md, "Stub version")
 INFO, BEGIN, DATA, END, DELETE = 0x90A0, 0x90A1, 0x90A2, 0x90A3, 0x90A4
+PUSH, PUSH_WIDGET, PUSH_BLOB = 0x90A8, 0, 1  # stub 8, docs/widget-push.md
 
 
 class Status(enum.IntEnum):
@@ -25,6 +27,7 @@ class Status(enum.IntEnum):
     NO_APP = 7
     FULL = 8
     PAUSED = 9
+    LATER = 10
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,8 @@ async def _call(s, c2: int, payload: bytes) -> bytes:
     reply = await s.request(SYSTEM, c2, payload, c2 | 0xA000)
     if not reply:
         raise ValueError("empty reply")
+    if reply[0] == Status.LATER and len(reply) == 5:
+        raise ValueError(f"watch refused command {c2:#06x}: LATER, retry in {struct.unpack_from('<I', reply, 1)[0]} ms")
     if reply[0] != Status.OK:
         try:
             name = Status(reply[0]).name
@@ -82,9 +87,16 @@ async def stub(s) -> Stub:
     return Stub(struct.unpack_from("<I", reply, 1)[0], reply[5])
 
 
-async def listing(s) -> dict[int, Header]:
+def slots(stub: Stub) -> int:
+    """App slots the stub takes: INFO/BEGIN/DELETE of 8..15 answer BAD_REQUEST before stub 8."""
+    return SLOTS if stub.version >= 8 else SLOTS_OLD
+
+
+async def listing(s, count: int | None = None) -> dict[int, Header]:
+    if count is None:
+        count = slots(await stub(s))
     found = {}
-    for slot in (*range(SLOTS), LOADER_SLOT):
+    for slot in (*range(count), LOADER_SLOT):
         header = await info(s, slot)
         if header:
             found[slot] = header
@@ -100,9 +112,10 @@ async def install(s, data: bytes, slot: int | None = None) -> int:
     if pkg.kind == package.KIND_LOADER:
         slot = LOADER_SLOT
     elif slot is None:
-        used = await listing(s)
-        same = [n for n, h in used.items() if n < SLOTS and h.name == pkg.name]
-        free = [n for n in range(SLOTS) if n not in used]
+        count = slots(await stub(s))
+        used = await listing(s, count)
+        same = [n for n, h in used.items() if n < count and h.name == pkg.name]
+        free = [n for n in range(count) if n not in used]
         if not same and not free:
             raise ValueError("no free slot")
         slot = (same or free)[0]
@@ -121,3 +134,17 @@ async def upload(s, slot: int, data: bytes) -> None:
 
 async def remove(s, slot: int) -> None:
     await _call(s, DELETE, bytes([slot]))
+
+
+def widget_record(title: str, value: str) -> bytes:
+    """The 64-byte widget file, as the SDK's widget_record: title (<= 23 bytes) at 0, value (<= 39) at 24, NUL-padded,
+    each cut at a UTF-8 character boundary."""
+    def field(text: str, size: int) -> bytes:
+        raw = text.encode("utf-8")[:size - 1]
+        return raw.decode("utf-8", "ignore").encode("utf-8").ljust(size, b"\0")
+    return field(title, 24) + field(value, 40)
+
+
+async def push(s, slot: int, kind: int, data: bytes) -> None:
+    """PUSH (stub 8): the app's widget record (64 bytes) or start blob (<= 128 bytes); empty data removes it."""
+    await _call(s, PUSH, bytes([slot, kind]) + data)

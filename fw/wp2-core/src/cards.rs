@@ -188,6 +188,7 @@ mod tests {
         assert_eq!(page_slot(0xF8), Some(0));
         assert_eq!(page_slot(0xFF), Some(7));
         assert_eq!(page_slot(0xF0), None);
-        assert_eq!(page_slot(0x100), None);
+        assert_eq!(page_slot(0x107), Some(15));
+        assert_eq!(page_slot(0x108), None);
     }
 }

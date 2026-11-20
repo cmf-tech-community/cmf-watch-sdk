@@ -553,6 +553,12 @@ pub fn sensor(buf: &[u8]) -> Option<(u8, bool)> {
     }
 }
 
+/// GPS_FIX record (op 0x18, handle 0, payload = `gps::FIX_LEN` bytes the loader overwrites with the latest fix),
+/// alone in a batch (docs/abi-1.4.md, "GPS"). On an older loader op 0x18 is `Malformed` (-22).
+pub fn gps_fix(buf: &[u8]) -> bool {
+    buf.len() == 4 + crate::gps::FIX_LEN && buf[..4] == [0x18, crate::gps::FIX_LEN as u8, 0, 0]
+}
+
 /// LV_DIR_LEFT / LV_DIR_RIGHT.
 pub const DIR_LEFT: u8 = 1;
 pub const DIR_RIGHT: u8 = 2;
@@ -576,7 +582,7 @@ pub const MEDIA_NEXT: u8 = 4;
 
 /// MEDIA_KEY record (op 0x16, handle 0, payload `[cmd]`, cmd 1 play, 2 pause, 3 previous, 4 next, 5 volume up,
 /// 6 volume down), alone in a batch (docs/abi-1.4.md, "Music"). On an older loader op 0x16 is `Malformed` (-22);
-/// a loader of 2026-11-16 answers `-22` to 5 and 6.
+/// the loaders of 2026-11-16 to 2026-11-19 answer `-22` to 5 and 6.
 pub fn media_key(buf: &[u8]) -> Option<u8> {
     match *buf {
         [0x16, 1, 0, 0, cmd @ MEDIA_PLAY..=MEDIA_VOLUME_DOWN] => Some(cmd),
@@ -1028,6 +1034,20 @@ mod tests {
         assert_eq!(sensor(cmf_wp2_app::HEART_ON), Some((crate::heart::SENSOR_HEART, true)));
         assert_eq!(sensor(cmf_wp2_app::HEART_OFF), Some((crate::heart::SENSOR_HEART, false)));
         assert_eq!(validate(cmf_wp2_app::HEART_ON, &Table::new(), 0), Err(Error::Malformed));
+        assert_eq!(sensor(cmf_wp2_app::GPS_ON), Some((crate::gps::SENSOR_GPS, true)));
+        assert_eq!(sensor(cmf_wp2_app::GPS_OFF), Some((crate::gps::SENSOR_GPS, false)));
+    }
+
+    #[test]
+    fn gps_fix_record() {
+        let mut buf = [0u8; 4 + crate::gps::FIX_LEN];
+        buf[..4].copy_from_slice(&[0x18, 20, 0, 0]);
+        assert!(gps_fix(&buf));
+        assert!(!gps_fix(&buf[..23]), "exact length");
+        buf[2] = 1;
+        assert!(!gps_fix(&buf), "handle 0 only");
+        buf[2] = 0;
+        assert_eq!(validate(&buf, &Table::new(), 0), Err(Error::Malformed));
     }
 
     #[test]

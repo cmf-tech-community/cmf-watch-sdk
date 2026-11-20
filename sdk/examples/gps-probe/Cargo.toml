@@ -1,0 +1,13 @@
+[package]
+name = "gps-probe"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+cmf-wp2-app = { path = "../../cmf-wp2-app" }
+
+[[bin]]
+name = "gps-probe"
+test = false
+bench = false

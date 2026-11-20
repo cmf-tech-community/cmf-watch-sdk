@@ -53,7 +53,7 @@ non-zero.
 
 | Opcode | Direction | Plaintext | Reply |
 |---|---|---|---|
-| `0x90A5` MSG | host → app | `slot: u8` (`0..7`, or `0xFF` = whatever runs), `data[1..=128]` | `0xB0A5`: `status: u8` |
+| `0x90A5` MSG | host → app | `slot: u8` (`0..7`, `0..15` from stub 8, or `0xFF` = whatever runs), `data[1..=128]` | `0xB0A5`: `status: u8` |
 | `0xB0A6` EVENT | app → host, after the reply to any host frame | `seq: u8`, `slot: u8`, `data[1..=128]` | none |
 | `0x90A7` PING | host → stub | one dummy byte | `0xB0A7`: `0`, `running_slot`, `app_flags` |
 
@@ -175,7 +175,7 @@ None ships in ABI 1.1. What was found, and what is missing:
 | Sensor | Stock path found | Emulator model | Missing |
 |---|---|---|---|
 | accelerometer | ux2sys property `0x2B` getter `0x100E2EB1` copies a 24 B sample from `0x3800C9C8` (`AT GETGSENSOR` prints words 0–2 as floats X, Y, Z) | STK8321, input `a x y z` (mg) | with `a 100 -200 1000` and `a 0 500 -1000` the buffer stayed all zero: stock fills it only while some consumer runs the sensor (factory test, raise to wake?). Who starts the stream and how to stop it again was not found |
-| GPS | `AT SETGPSSWITCH` sets property `0x63` (mode 0..5), `AT GETGPSSNR` reads property `0x62` | UART NMEA, input `g on lat_e6 lon_e6` | not tried: mode semantics, power owner and stop path unknown |
+| GPS | `AT SETGPSSWITCH` sets property `0x63` (mode 0..5), `AT GETGPSSNR` reads property `0x62` | UART NMEA, input `g on lat_e6 lon_e6` | shipped later, loader of 2026-11-19: `docs/abi-1.4.md`, "GPS"; modes, owner and stop path in `docs/recon.md`, "GPS" |
 | heart rate | property `0x02` "change_hr_mode" (`0x10196460(4, 5, …)` on, `(5, 5, …)` off) | none; only a firmware hook (`health_hook`) | no PPG model, nothing to prove it against |
 
 Rules for any sensor that ships later: the loader owns start and stop (off at exit, pause, crash, force stop and

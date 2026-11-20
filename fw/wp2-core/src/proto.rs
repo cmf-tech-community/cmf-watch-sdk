@@ -13,6 +13,12 @@ pub const EVENT: u16 = 0xB0A6;
 pub const ANY_SLOT: u8 = 0xFF;
 // keep-alive: refreshes the host key, answers running_slot and app_flags (0x90A6 is skipped: its reply is EVENT)
 pub const PING: u16 = 0x90A7;
+// stub 8, host -> stub: an app's widget record or start blob while it does not run (docs/widget-push.md)
+pub const PUSH: u16 = 0x90A8;
+pub const PUSH_WIDGET: u8 = 0;
+pub const PUSH_BLOB: u8 = 1;
+// one write per slot and kind per minute: each one is a NAND write
+pub const PUSH_EVERY_MS: u32 = 60_000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u8)]
@@ -27,6 +33,8 @@ pub enum Status {
     NoApp = 7,
     Full = 8,
     Paused = 9,
+    // PUSH sooner than PUSH_EVERY_MS after the last write of that record; the reply carries the ms left
+    Later = 10,
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,6 +47,7 @@ pub enum Request<'a> {
     Delete(u8),
     Msg { slot: u8, data: &'a [u8] },
     Ping,
+    Push { slot: u8, kind: u8, data: &'a [u8] },
 }
 
 fn slot(raw: u8) -> Result<u8, Status> {
@@ -59,9 +68,21 @@ pub fn parse(c2: u16, payload: &[u8]) -> Result<Request<'_>, Status> {
         (END, 1) => Ok(Request::End),
         (DELETE, 1) => Ok(Request::Delete(slot(payload[0])?)),
         (PING, 1) => Ok(Request::Ping),
+        // empty data removes the record; a widget record is the whole 64-byte file, a blob up to MSG_MAX bytes
+        (PUSH, n) if n >= 2 && payload[0] < SLOTS => match (payload[1], n - 2) {
+            (PUSH_WIDGET, 0 | crate::layout::WIDGET_REC) | (PUSH_BLOB, 0..=MSG_MAX) => {
+                Ok(Request::Push { slot: payload[0], kind: payload[1], data: &payload[2..] })
+            }
+            _ => Err(Status::BadRequest),
+        },
         (MSG, n) if (2..=1 + MSG_MAX).contains(&n) && (payload[0] < SLOTS || payload[0] == ANY_SLOT) => Ok(Request::Msg { slot: payload[0], data: &payload[1..] }),
         _ => Err(Status::BadRequest),
     }
+}
+
+// ms left before a PUSH may write the record last written at `last` (millis | 1; 0 = not since boot)
+pub fn push_wait(last: u32, now: u32) -> u32 {
+    if last == 0 { 0 } else { PUSH_EVERY_MS.saturating_sub(now.wrapping_sub(last)) }
 }
 
 #[cfg(test)]
@@ -77,7 +98,7 @@ mod tests {
         assert_eq!(parse(0x90A3, &[0, 0]), Err(Status::BadRequest));
         assert_eq!(parse(0x90A3, &[0]), Ok(Request::End));
         assert_eq!(parse(0x90A6, &[]), Err(Status::BadRequest));
-        assert_eq!(parse(0x90A4, &[9]), Err(Status::BadRequest));
+        assert_eq!(parse(0x90A4, &[16]), Err(Status::BadRequest));
     }
 
     #[test]
@@ -86,9 +107,34 @@ mod tests {
         assert!(matches!(parse(MSG, &[3; 1 + MSG_MAX]), Ok(Request::Msg { slot: 3, .. })));
         assert_eq!(parse(MSG, &[3; 2 + MSG_MAX]), Err(Status::BadRequest));
         assert_eq!(parse(MSG, &[3]), Err(Status::BadRequest));
-        assert_eq!(parse(MSG, &[8, 1]), Err(Status::BadRequest));
+        assert_eq!(parse(MSG, &[16, 1]), Err(Status::BadRequest));
+        assert!(matches!(parse(MSG, &[15, 1]), Ok(Request::Msg { slot: 15, .. })));
         assert_eq!(parse(PING, &[0]), Ok(Request::Ping));
         assert_eq!(parse(0x90A6, &[0]), Err(Status::BadRequest));
+    }
+
+    #[test]
+    fn push_bounds() {
+        let mut p = [0u8; 2 + 128];
+        (p[0], p[1]) = (15, PUSH_WIDGET);
+        assert_eq!(parse(PUSH, &p[..66]), Ok(Request::Push { slot: 15, kind: 0, data: &p[2..66] }));
+        assert_eq!(parse(PUSH, &p[..2]), Ok(Request::Push { slot: 15, kind: 0, data: &[] }));
+        assert_eq!(parse(PUSH, &p[..65]), Err(Status::BadRequest));
+        p[1] = PUSH_BLOB;
+        assert!(matches!(parse(PUSH, &p), Ok(Request::Push { kind: 1, .. })));
+        assert_eq!(parse(PUSH, &[15, PUSH_BLOB, 9]), Ok(Request::Push { slot: 15, kind: 1, data: &[9] }));
+        assert_eq!(parse(PUSH, &[16, PUSH_BLOB, 9]), Err(Status::BadRequest));
+        assert_eq!(parse(PUSH, &[0xFF, PUSH_BLOB, 9]), Err(Status::BadRequest));
+        assert_eq!(parse(PUSH, &[0, 2, 9]), Err(Status::BadRequest));
+        assert_eq!(parse(PUSH, &[0]), Err(Status::BadRequest));
+    }
+
+    #[test]
+    fn push_rate() {
+        assert_eq!(push_wait(0, 5), 0);
+        assert_eq!(push_wait(1001, 1001 + PUSH_EVERY_MS), 0);
+        assert_eq!(push_wait(1001, 1001 + 1000), PUSH_EVERY_MS - 1000);
+        assert_eq!(push_wait(u32::MAX, 100), PUSH_EVERY_MS - 101, "wraps");
     }
 
     #[test]
@@ -103,7 +149,8 @@ mod tests {
     #[test]
     fn parse_requests() {
         assert_eq!(parse(0x90A1, &[3, 0x10, 0, 0, 0, 0xEF, 0xBE, 0xAD, 0xDE]), Ok(Request::Begin { slot: 3, size: 16, crc: 0xDEADBEEF }));
-        assert_eq!(parse(0x90A1, &[8, 0, 0, 0, 0, 0, 0, 0, 0]), Err(Status::BadRequest));
+        assert_eq!(parse(0x90A1, &[16, 0, 0, 0, 0, 0, 0, 0, 0]), Err(Status::BadRequest));
+        assert!(matches!(parse(0x90A1, &[15, 0, 0, 0, 0, 0, 0, 0, 0]), Ok(Request::Begin { slot: 15, .. })));
         assert_eq!(parse(0x90A2, &[0; 4 + 129]), Err(Status::BadRequest));
         assert_eq!(parse(0x90A4, &[0xFF]), Ok(Request::Delete(0xFF)));
     }

@@ -199,12 +199,20 @@ uv run --locked wp2apps install target/<name>.wp2app --address <UUID>
   and the page's app take the install while the page is not in view, keep running the old code, and the page loads
   the new loader and starts the new app the next time it comes into view (`behind_face`, `fw/wp2-stub/src/view.rs`,
   `tests/test_page_install_e2e.py`). Nothing to remove first, no host change. A page in view is a foreground app:
-  `BUSY` as before. `remove` of the page's app or the loader still answers `BUSY`; stub 5 answers `BUSY` to both.
+  `BUSY` as before. Stub 5 answers `BUSY` to both.
+- From stub 7 on `remove` of a page's app behind the face is no `BUSY` either: the stub takes the app's page and its
+  widgets (`0x40` / slot + 1) off the cards, as "Remove page" / "Remove widget" on the watch, then deletes the package
+  and its data. Storing the cards lays the face out again at once (as the phone's `0x906D` set does), which deletes
+  the page view and stops its app. A widget goes with every `remove`, running app or not (`forget`,
+  `fw/wp2-stub/src/ble.rs`, `tests/test_page_delete_e2e.py`). A page in view, the menu or an app in the foreground
+  stay `BUSY`, and so does `remove` of the loader while it is held, a page behind the face included (the page would
+  stay on the cards without a loader). Stub 6 still answers `BUSY` to a page's app.
 - `install`, `list` and `remove` do a full bind, and the stock then shows a "Paired" popup. Close it with the
   button. If an app was running, closing that popup ends it (section 4).
 - Open an app: stock app list (list style, not waterfall) → "Custom Apps", the first row → tap the app's row (the
-  crown scrolls the list). The row shows the name and `vN`. If `main` returns a non-zero code, the row shows
-  `Error <code>` for 2 s (`fw/wp2-loader/src/main.rs`, `fail`).
+  crown scrolls the list). The row shows the name and `vN`. Rows come in the order the phone set, then the other
+  apps in slot order (`docs/app-order.md`). 16 slots from stub 8, 8 before it (`docs/abi-1.4.md`, "16 app
+  slots"). If `main` returns a non-zero code, the row shows `Error <code>` for 2 s (`fw/wp2-loader/src/main.rs`, `fail`).
 - Remove on the watch: a long press on the app's row asks "Delete" / "Cancel" with its name; Delete removes the
   package and its data (as `wp2apps remove`) and the list is built again (loader of 2026-11-14,
   `tests/test_menu_delete_e2e.py`).
@@ -311,6 +319,7 @@ have ~5 ms granularity (`next_event` in `fw/wp2-loader/src/app.rs`). Never spin 
 | `RESUME` (6) | the popup closed | The loader repaints the whole framebuffer itself. Redraw time-dependent parts; ask the host for a fresh snapshot |
 | `MESSAGE` (7) | ABI 1.1: a host message is in the inbox | `x` = its length. A hint: drain with `recv` until `None` |
 | `HEART` (9) | about once a second after `heart_rate(true)` (loader of 2026-11-14) | `delta` = bpm, 0 = no reading yet or off the wrist; `x` = 1 on the wrist. Personal data: never log it |
+| `GPS` (11) | about once a second after `gps(true)` (loader of 2026-11-19) | `x` = fix quality (0 = no fix yet), `y` = satellites; the position comes from `gps_fix()`. Personal data: never log it |
 
 - The queue holds 15 events; more are dropped (`fw/wp2-core/src/events.rs`).
 - **An app can end without any event.** Closing the "Paired" popup jumps to the clock and deletes the view. All of
@@ -379,6 +388,8 @@ One blob of at most `STORE_MAX = 4096` bytes per slot, in `/NAND:/wp2apps/<slot>
 | `media_key(cmd: u8) -> i32` | `-22` | Phone music: `MEDIA_PLAY`, `MEDIA_PAUSE`, `MEDIA_PREV`, `MEDIA_NEXT`. `0`, `-19` with no phone link or media (`docs/abi-1.4.md`, "Music") |
 | `media_bind(title: Option<lv::Obj>, artist: Option<lv::Obj>) -> i32` | `-22` | The loader writes the phone's track into these labels once a second and sends `MEDIA` (`x` playing, `y` available) at the bind and on change; `media_unbind()` stops it. Unbind before deleting the labels |
 | `heart_rate(on: bool) -> i32` | `0`, `-22` on an older loader | Starts or stops the stock heart-rate measurement for `HEART` events. Held only while the app runs and is not paused; stopped on pause, exit, crash, force stop and view delete; started again on resume. Costs battery (the PPG LED). Works in canvas and LVGL apps; `docs/abi-1.4.md`, "Heart rate" |
+| `gps(on: bool) -> i32` | `0`, `-22` on an older loader | Turns the watch's GPS on or off for `GPS` events, with the same lifecycle as `heart_rate` (off on pause, exit, crash, force stop; a GPS a stock workout runs is only read). Costs battery; the stock also stores its own track points while it has a fix; `docs/abi-1.4.md`, "GPS" |
+| `gps_fix() -> Option<GpsFix>` | the latest fix, `None` without `gps(true)` or on an older loader | `lat_e7`, `lon_e7` (1e-7°), `alt_dm`, `fix`, `sats`, `ttff_s`, `ms`. No speed or course: derive them from successive fixes (`sdk/examples/gps-probe`) |
 | `keep_screen_on(on: bool)` | – | Records the wish; the next UI tick takes or drops the stock wake lock. Held only while the app runs and is not paused; dropped on pause, exit, crash, force stop and view delete; taken again on resume. Costs display power: hold it with a deadline (herdr-agents: 20 s after a buzz) |
 
 ### Widget (card left of the watch face)
@@ -396,6 +407,8 @@ and a white value, on the stock card grey in the system font. The app only store
   synchronously: call it when the value changes or at exit, never per frame.
 - The card reads the record when it is laid out, and that happens every time the watch face shows. The app runs only
   under the loader view, so its update is on the card the next time the user goes back to the face and swipes left.
+- From stub 8 the phone can also set the record while the app does not run (`PUSH`, at most once a minute), and a
+  small blob the app gets as its first host message at start: `docs/widget-push.md`.
 - Before the first call the tile shows the package name; an empty slot shows "Apps".
 - Declare it: `cmf_wp2_app::app_features!(cmf_wp2_app::WIDGET);` next to `entry!`. The user then adds it on the
   watch: a long press on the app's row in Apps → "Add widget" (again: "Remove widget"). It goes next to other app
@@ -767,8 +780,8 @@ loop {
 | LVGL with a framebuffer fallback (simulator); a growing log, newest on top, oldest deleted | `api-demo/src/main.rs`, `log.rs` |
 | Text into a buffer with `core::fmt::Write` | `Buf<N>` in `api-demo/src/main.rs` |
 
-Missing today: bitmaps (only `rect`; the icon path is loader-only), touch move, gestures and long press, any sensor
-(accelerometer, heart rate and GPS were looked at and not shipped, `docs/abi-1.1.md`), a notice before the screen
+Missing today: bitmaps (only `rect`; the icon path is loader-only), touch move, gestures and long press, the accelerometer
+(looked at and not shipped, `docs/abi-1.1.md`; heart rate and GPS ship as `heart_rate` and `gps`), a notice before the screen
 blanks, a random source and a phone-side host. In the kit: rounded arc caps, a scroll bar widget, and a ring that
 repaints only the changed sector.
 

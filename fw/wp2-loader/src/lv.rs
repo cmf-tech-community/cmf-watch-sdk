@@ -120,9 +120,16 @@ pub extern "C" fn submit(buf: *const u8, len: usize) -> i32 {
     if buf.is_null() || len > BATCH_MAX || p < block || p - block > size || len > size - (p - block) {
         return E_ARG;
     }
-    // SENSOR (heart rate) needs no LVGL: a canvas app sends it too, and it must not make the root
+    // SENSOR (heart rate, GPS) needs no LVGL: a canvas app sends it too, and it must not make the root
     if let Some((sensor, on)) = lvcmd::sensor(unsafe { core::slice::from_raw_parts(buf, len) }) {
+        if sensor == wp2_core::gps::SENSOR_GPS {
+            return crate::gps::request(on);
+        }
         return crate::hr::request(sensor, on);
+    }
+    if lvcmd::gps_fix(unsafe { core::slice::from_raw_parts(buf, len) }) {
+        // the record lies in the app block (checked above): its payload is the app's to overwrite
+        return crate::gps::fix(unsafe { (buf as *mut u8).add(4) });
     }
     if lvcmd::page_query(unsafe { core::slice::from_raw_parts(buf, len) }) {
         return crate::app::ON_PAGE.load(Ordering::Acquire) as i32;

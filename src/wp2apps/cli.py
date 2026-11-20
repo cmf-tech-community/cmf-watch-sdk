@@ -35,6 +35,12 @@ def cmd_info(args):
     }, indent=2))
 
 
+def cmd_order(args):
+    data = package.set_order(args.loader.read_bytes(), args.names)
+    with args.output.open("xb") as out:
+        out.write(data)
+
+
 def cmd_firmware(args):
     if args.motor_only and args.stub:
         raise ValueError("--motor-only takes no --stub")
@@ -108,13 +114,13 @@ def slot_arg(text):
     if text.upper() == "L":
         return install.LOADER_SLOT
     if not text.isdigit() or int(text) >= install.SLOTS:
-        raise argparse.ArgumentTypeError("slot must be 0..7 or L")
+        raise argparse.ArgumentTypeError("slot must be 0..15 (8..15 from stub 8) or L")
     return int(text)
 
 
 def app_slot_arg(text):
     if not text.isdigit() or int(text) >= install.SLOTS:
-        raise argparse.ArgumentTypeError("slot must be 0..7")
+        raise argparse.ArgumentTypeError("slot must be 0..15 (8..15 from stub 8)")
     return int(text)
 
 
@@ -163,6 +169,17 @@ def cmd_install(args):
     print(json.dumps({"installed": slot_name(slot)}))
 
 
+def cmd_push(args):
+    if args.blob is not None:
+        kind, data = install.PUSH_BLOB, bytes.fromhex(args.blob)
+    elif args.title is not None:
+        kind, data = install.PUSH_WIDGET, install.widget_record(args.title, args.value)
+    else:
+        kind, data = install.PUSH_WIDGET, b""
+    asyncio.run(with_watch(args, lambda s: install.push(s, args.slot, kind, data)))
+    print(json.dumps({"pushed": slot_name(args.slot), "kind": ("widget", "blob")[kind], "bytes": len(data)}))
+
+
 def cmd_remove(args):
     asyncio.run(with_watch(args, lambda s: install.remove(s, args.slot)))
     print(json.dumps({"removed": slot_name(args.slot)}))
@@ -170,7 +187,8 @@ def cmd_remove(args):
 
 def cmd_list(args):
     async def both(s):
-        return await install.stub(s), await install.listing(s)
+        stub = await install.stub(s)
+        return stub, await install.listing(s, install.slots(stub))
 
     stub, found = asyncio.run(with_watch(args, both))
     print(json.dumps({"stub": {"version": stub.version, "abi_minor": stub.abi_minor}, "slots": {slot_name(n): {"name": h.name, "version": h.version, "kind": h.kind,
@@ -288,6 +306,12 @@ def parser():
     info = commands.add_parser("info", help="Validate a package and print its header")
     info.add_argument("package", type=Path)
     info.set_defaults(handler=cmd_info)
+    order = commands.add_parser("order", help="Loader package with this Apps menu order (docs/app-order.md); "
+                                "install it like any loader")
+    order.add_argument("loader", type=Path)
+    order.add_argument("names", nargs="*", help="package names, first row first; empty: slot order")
+    order.add_argument("--output", type=Path, required=True)
+    order.set_defaults(handler=cmd_order)
     fw = commands.add_parser("firmware", help="Patch the stock app.bin (heap reservation, stub, motor strength, weak vibration level)")
     fw.add_argument("--stub", type=Path)
     fw.add_argument("--motor", type=int, default=1000, metavar="PERMILLE",
@@ -316,13 +340,21 @@ def parser():
                                  ("list", cmd_list, "List installed packages"),
                                  ("send", cmd_send, "Send one message to the running app (ABI 1.1)"),
                                  ("listen", cmd_listen, "Print the running app's messages as JSON lines"),
-                                 ("chat", cmd_chat, "Type lines to the running app, print what it sends back")):
+                                 ("chat", cmd_chat, "Type lines to the running app, print what it sends back"),
+                                 ("push", cmd_push, "Set an app's widget text or start blob while it does not run "
+                                  "(stub 8, docs/widget-push.md); no --title/--blob clears the widget")):
         sub = commands.add_parser(name, help=help_)
         if name == "install":
             sub.add_argument("package", type=Path)
             sub.add_argument("--slot", type=slot_arg)
         if name == "remove":
             sub.add_argument("--slot", type=slot_arg, required=True)
+        if name == "push":
+            sub.add_argument("--slot", type=app_slot_arg, required=True)
+            what = sub.add_mutually_exclusive_group()
+            what.add_argument("--title", help="widget title (<= 23 bytes); --value is the text below it")
+            what.add_argument("--blob", metavar="HEX", help="start blob (<= 128 bytes); empty string removes it")
+            sub.add_argument("--value", default="", help="widget value (<= 39 bytes, \\n for a second line)")
         if name in ("send", "listen", "chat"):
             sub.add_argument("--slot", type=app_slot_arg, default=channel.ANY,
                              help="only this app slot (default: whatever runs)")

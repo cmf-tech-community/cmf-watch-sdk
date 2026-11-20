@@ -1,5 +1,5 @@
 // Phone music for apps (docs/abi-1.4.md, "Music"), as the stock music view and workout screen do it: MEDIA_KEY sends
-// a play/pause/previous/next command (ux2sys 0x4E) when the phone link and its media are up; MEDIA_BIND has the UI
+// a play/pause/previous/next/volume command (ux2sys 0x4E) when the phone link and its media are up; MEDIA_BIND has the UI
 // tick write the track title and artist into two of the app's labels once a second and queue a MEDIA event when
 // playing/available change. The stock calls run on the UI thread.
 use crate::app::{millis, QUEUE};
